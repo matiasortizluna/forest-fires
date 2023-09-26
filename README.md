@@ -4,6 +4,8 @@ By Matias Luna, Ana Torres & Inês Gonçalves
 
 Open notebook.nb.html to see code of the project.
 
+Open DataMiningI-1.pdf to see the Power Point of the project for more details about Visualization and Results.
+
 # About the project
 
 The project's objetive was to appy Data mining techniques to predict the cause of a set of fires that occur in Portugal and, thus, better support the decision to take preventive measures to avoid tragedy. 
