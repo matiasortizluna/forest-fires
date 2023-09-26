@@ -30,7 +30,9 @@ Output of the Classification Model: probability of a fire being intentional
 In this step, the data is analyzed in order to understand the type of data, which is Tabular and Nondependency-oriented, but also the type and scales of the attributes, for example:
 
 • id : Numerical and Ratio
+
 • region: Categorical and Nominal
+
 • alert_date: Numerical and Interval
 
 This analysis was performed on all attributes before continuing the project.
@@ -61,9 +63,11 @@ Inconsistent or incorrect values
 
 ![image](https://github.com/matiasortizluna/forest-fires/assets/64530615/3f3444a8-53d1-44b4-8694-5e193476ee0f)
 
-Data transformation
+# Data transformation
+
 
 • Conversion of all coordinates to the decimal form.
+
 
 Dimensionality Reduction - Feature Selection
 
@@ -79,6 +83,7 @@ All of these variables were removed because they were irrelevant to the analysis
 
 • alert_source
 
+
 Feature Engineering
 
 Through the values of the coordinates ("lat" and "lon") and the alert date ("alert_date") a few more variables were added.
@@ -90,6 +95,7 @@ Through the values of the coordinates ("lat" and "lon") and the alert date ("ale
 • windGust (rajada de vento)
 
 • windVelocity (velocidade do vento)
+
 
 # Data Visualization
 
@@ -109,8 +115,42 @@ Through the values of the coordinates ("lat" and "lon") and the alert date ("ale
 
 ![image](https://github.com/matiasortizluna/forest-fires/assets/64530615/94c9bec0-7aff-4bdf-80a9-da2765da6370)
 
+
 # Predictive Modelling
 
+• Evaluation Metric: AUC (Area under the Curve)
+
+• Train and Test Split (70% - 30%)
+
+• k-fold Cross Validation
+
+• Applied recipes where:
+
+  + Too Disperse predictors -> removed
+
+  + Categorical predictors -> converted to numeric values
+
+  + Numeric predictors -> centered and scaled
+
+  + Date predictors -> sometimes included (depends on the model) + Variables with large correlations to others -> removed
 
 
+Best Results
+
+![image](https://github.com/matiasortizluna/forest-fires/assets/64530615/4edf2d01-b829-43f8-9f2d-d8edd5819516)
+
+Last Fit
+
+![image](https://github.com/matiasortizluna/forest-fires/assets/64530615/83b85ecd-917b-4884-b27c-b5e25ffa5c19)
+
+# Conclusions, Limitations and Future Work
+
+• The model that achieved the most AUC was Random Forest.
+
+• According to the last fit model, the variables that matter the most (above 25% of importance)
+
+• One of the limitations was making the data tidy and working in the correct formats that the models needed.
+
+• For future work, more variations of features could be selected for other models to produce better results. Also, different tuning of the parameters could be performed.
+are: tempMax; total_area; village_area; windGust; vegetation_area.
 
