@@ -26,9 +26,14 @@ Target Variable: "intentional_cause" • 0->no • 1->yes
 Output of the Classification Model: probability of a fire being intentional
 
 # Data Understanding
-Type of Data
-• Tabular
-• Nondependency-oriented data
+
+In this step, the data is analyzed in order to understand the type of data, which is Tabular and Nondependency-oriented, but also the type and scales of the attributes, for example:
+
+• id : Numerical and Ratio
+• region: Categorical and Nominal
+• alert_date: Numerical and Interval
+
+This analysis was performed on all attributes before continuing the project.
 
 # Data Preparation | Data Quality Issues
 
@@ -87,4 +92,25 @@ Through the values of the coordinates ("lat" and "lon") and the alert date ("ale
 • windVelocity (velocidade do vento)
 
 # Data Visualization
+
+![image](https://github.com/matiasortizluna/forest-fires/assets/64530615/d7daf438-8225-4fce-ac61-6c8377c8bb0c)
+
+![image](https://github.com/matiasortizluna/forest-fires/assets/64530615/502ab651-f5ac-4679-b0bf-b0c4b32fbb45)
+
+![image](https://github.com/matiasortizluna/forest-fires/assets/64530615/4524b8f5-3706-4e1b-8de6-e1935823a15e)
+
+![image](https://github.com/matiasortizluna/forest-fires/assets/64530615/f021d952-53a3-404f-92fd-a83a8bae63f3)
+
+![image](https://github.com/matiasortizluna/forest-fires/assets/64530615/091e7535-5b3f-4f23-a3b8-c726cbb30320)
+
+![image](https://github.com/matiasortizluna/forest-fires/assets/64530615/ce95381a-01e1-42d9-9f7a-a122b5e95741)
+
+![image](https://github.com/matiasortizluna/forest-fires/assets/64530615/b8d42358-2d4f-41ad-a924-56f63e37fff3)
+
+![image](https://github.com/matiasortizluna/forest-fires/assets/64530615/94c9bec0-7aff-4bdf-80a9-da2765da6370)
+
+# Predictive Modelling
+
+
+
 
