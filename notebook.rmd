@@ -1,0 +1,2588 @@
+---
+title: "Forest Fires - G8"
+output: html_notebook
+---
+
+
+# Data Understanding
+
+```{r}
+
+########### Import libraries ########### 
+library(tidymodels)
+library(base)
+library(readr)
+library(dplyr)
+library(tidyverse)
+library(remotes)
+library(caret)
+
+########### Set directory ########### 
+setwd("/Users/matiasluna/Library/CloudStorage/OneDrive-UniversidadedoPorto/CC4018 - Data Mining I/Projeto")
+getwd()
+
+########### Read dataset ########### 
+fires <- read_csv("fires_train.csv")
+str(fires)
+summary(fires)
+
+########### DATA PRE-PROCESSING ###########
+# Clean the data so is tidy
+
+# Remove variable 'alert_source' because it is not useful
+fires <- fires %>% select(-alert_source)
+str(fires)
+summary(fires)
+
+# Fill the values of the column "region" that are missing
+fires$region[(fires$region=='-' & fires$district=='Coimbra')] <- 'Beira Litoral'
+fires$region[(fires$region=='-' & fires$district=='Bragança')] <- 'Trás-os-Montes'
+fires$region[(fires$region=='-' & fires$district=='Castelo Branco')] <- 'Beira Interior'
+fires$region[(fires$region=='-' & fires$district=='Aveiro')] <- 'Entre Douro e Minho'
+fires$region[(fires$region=='-' & fires$district=='Beja')] <- 'Alentejo'
+fires$region[(fires$region=='-' & fires$district=='Lisboa')] <- 'Ribatejo e Oeste'
+fires$region[(fires$region=='-' & fires$district=='Santarém')] <- 'Ribatejo e Oeste'
+fires$region[(fires$region=='-' & fires$district=='Porto')] <- 'Entre Douro e Minho'
+fires$region[(fires$region=='-' & fires$district=='Viana do Castelo')] <- 'Entre Douro e Minho'
+
+fires$region[(fires$region=='-' & fires$municipality=='Ponte De Lima')] <- 'Entre Douro e Minho'
+
+fires$region[(fires$region=='-' & fires$district=='Vila Real')] <- 'Trás-os-Montes'
+fires$region[(fires$region=='-' & fires$district=='Viseu')] <- 'Entre Douro e Minho'
+fires$region[(fires$region=='-' & fires$district=='Braga')] <- 'Entre Douro e Minho'
+fires$region[(fires$region=='-' & fires$district=='Guarda')] <- 'Beira Interior'
+fires$region[(fires$region=='-' & fires$district=='Leiria')] <- 'Beira Litoral'
+fires$region[(fires$region=='-' & fires$district=='Faro')] <- 'Algarve'
+fires$region[(fires$region=='-' & fires$district=='Portalegre')] <- 'Alentejo'
+fires$region[(fires$region=='-' & fires$district=='Setúbal')] <- 'Ribatejo e Oeste'
+fires$region[(fires$region=='-' & fires$district=='Évora')] <- 'Alentejo'
+str(fires)
+summary(fires)
+
+# Transform values of latitude and longitude to the same format. Delimitador ":"
+fires$lat <- chartr('º', ':', fires$lat)
+fires$lat <- chartr("'", ':', fires$lat)
+fires$lat <- gsub('::', '', fires$lat)
+
+fires$lon <- chartr('º', ':', fires$lon)
+fires$lon <- chartr("'", ':', fires$lon)
+fires$lon <- gsub('::', '', fires$lon)
+
+# Transform all values to DMS format
+fires$lat <- sub(':','º',fires$lat)
+fires$lat <- sub(':',"'",fires$lat)
+#fires$lat <- paste0(fires$lat, "''")
+
+fires$lon <- sub(':','º',fires$lon)
+fires$lon <- sub(':',"'",fires$lon)
+#fires$lon <- paste0(fires$lon, "''")
+
+# Remove the following string in lat "1900-01-01 "
+fires$lat <- gsub('1900-01-01 ', '', fires$lat)
+
+# Transform values from DMS to DD format
+
+# Create a new column with the values of the hours in latitude
+horasLat <- unlist(gregexpr("º", fires$lat)) # returns the position in the string of that char
+fires$horasLat <- substring(fires$lat, first=1, last=horasLat - 1)
+
+# Create a new column with the values of the minutes in latitude
+minLat <- unlist(gregexpr("'", fires$lat)) # returns the position in the string of that char
+fires$minLat <- substring(fires$lat, first=horasLat + 1, last=minLat - 1)
+
+# Create a new column with the values of the seconds in latitude
+segLat <- length(fires$lat)
+fires$segLat <- substring(fires$lat, first=minLat + 1, last=segLat)
+
+# Change the type of the columns hours, minutes, seconds of latitude to Integer
+fires[c(21, 22, 23)] <- lapply(fires[c(21, 22, 23)], as.integer) 
+typeof(fires$segLat)
+
+# Calculate latitude from DMS to DD format
+fires$lat <- fires$horasLat + (fires$minLat/60) + (fires$segLat/3600)
+
+# Create a new column with the values of the hours in longitude
+horasLon <- unlist(gregexpr("º", fires$lon)) # returns the position in the string of that char
+fires$horasLon <- substring(fires$lon, first=1, last=horasLon - 1)
+
+# Create a new column with the values of the minutes in longitude
+minLon <- unlist(gregexpr("'", fires$lon)) # returns the position in the string of that char
+fires$minLon <- substring(fires$lon, first=horasLon + 1, last=minLon - 1)
+
+# Create a new column with the values of the seconds in longitude
+segLon <- length(fires$lon)
+fires$segLon <- substring(fires$lon, first=minLon + 1, last=segLon)
+
+# Change the type of the columns hours, minutes, seconds of longitude to Integer
+fires[c(24, 25, 26)] <- lapply(fires[c(24, 25, 26)], as.integer) 
+typeof(fires$segLon)
+
+# Calculate longitude from DMS to DD format
+fires$lon <- (fires$horasLon + (fires$minLon/60) + (fires$segLon/3600))*(-1)
+
+# Read data metheorological data.
+meteo <- read_csv("meteo.csv")
+str(meteo)
+summary(meteo)
+
+fires <- mutate(fires, station_ID = NA)
+fires <- mutate(fires, Date = NA)
+fires <- mutate(fires, TemperatureCAvg = NA)
+fires <- mutate(fires, TemperatureCMax = NA)
+fires <- mutate(fires, TemperatureCMin = NA)
+fires <- mutate(fires, WindkmhDir = NA)
+fires <- mutate(fires, WindkmhGust = NA)
+fires <- mutate(fires, WindkmhInt = NA)
+
+# Join metheorological data with fires data
+for(i in 1:10309) { 
+  for (j in 1:9366) {
+    if (fires[i, 1]==meteo[j, 1]){
+      fires$station_ID[i] <- meteo$station_ID[j]
+      fires$Date[i] <- meteo$Date[j]
+      fires$TemperatureCAvg[i] <- meteo$TemperatureCAvg[j]
+      fires$TemperatureCMax[i] <- meteo$TemperatureCMax[j]
+      fires$TemperatureCMin[i] <- meteo$TemperatureCMin[j]
+      fires$WindkmhDir[i] <- meteo$WindkmhDir[j]
+      fires$WindkmhGust[i] <- meteo$WindkmhGust[j]
+      fires$WindkmhInt[i] <- meteo$WindkmhInt[j]
+    }
+  }
+}
+
+
+# Mean temperature of fires (mean, min, max) on each region 
+fires$MeanRegionTemperatureCAvg <- NA
+fires$MeanRegionTemperatureCMax <- NA
+fires$MeanRegionTemperatureCMin <- NA
+
+for (regiao in unique(fires$region)) {
+  fires_region_temp <- fires %>% select(id, region, TemperatureCAvg,TemperatureCMax,TemperatureCMin) %>% filter(region==regiao)
+  fires$MeanRegionTemperatureCAvg[fires$region==regiao] <- mean(fires_region_temp$TemperatureCAvg)
+  fires$MeanRegionTemperatureCMax[fires$region==regiao] <- mean(fires_region_temp$TemperatureCMax)
+  fires$MeanRegionTemperatureCMin[fires$region==regiao] <- mean(fires_region_temp$TemperatureCMin)
+}
+
+# Time that passed from alert to first_intervention, from alert to kill, from first_intervention to kill
+
+fires = subset(fires,  !is.na(fires$alert_date) & !is.na(fires$extinction_date) & !is.na(fires$firstInterv_date))
+
+fires$alert_date_complete <- NA
+fires$firstInterv_date_complete <- NA
+fires$extinction_date_complete <- NA
+
+fires$diff_alert_hour_firstInterv_hour_minute <- NA
+fires$diff_alert_hour_extinction_hour_hours <- NA
+fires$diff_firstInterv_hour_extinction_hour_hours <- NA
+
+for (i in 1:10309) {
+  
+  fires$alert_date[i] <- as.Date.POSIXct(fires$alert_date[i], tz = "UTC", "%Y-%m-%d")
+  fires$extinction_date[i] <- as.Date.POSIXct(fires$extinction_date[i], tz = "UTC", "%Y-%m-%d")
+  fires$firstInterv_date[i] <- as.Date.POSIXct(fires$firstInterv_date[i], tz = "UTC", "%Y-%m-%d")
+
+  fires$alert_date_complete[i] <- paste(fires$alert_date[i], "", fires$alert_hour[i])
+  fires$extinction_date_complete[i] <- paste(fires$extinction_date[i], "", fires$extinction_hour[i])
+  fires$firstInterv_date_complete[i] <- paste(fires$firstInterv_date[i], "", fires$firstInterv_hour[i])
+  
+  result <- grepl("NA", fires$alert_date_complete[i], fixed = TRUE)
+  result <- grepl("NA", fires$extinction_date_complete[i], fixed = TRUE)
+  result <- grepl("NA", fires$firstInterv_date_complete[i], fixed = TRUE)
+  
+  if (result==FALSE){
+    fires$diff_alert_hour_firstInterv_hour_minute[i] <- difftime(fires$firstInterv_date_complete[i] ,fires$alert_date_complete[i] , tz = "UTC", units = c("mins"))
+    fires$diff_alert_hour_extinction_hour_hours[i] <- difftime(fires$extinction_date_complete[i] ,fires$alert_date_complete[i], tz = "UTC", units = c("hours"))
+    fires$diff_firstInterv_hour_extinction_hour_hours[i] <- difftime(fires$extinction_date_complete[i] ,fires$firstInterv_date_complete[i], tz = "UTC",  units = c("hours"))  
+  }else {
+    print(i)
+  }
+}
+
+# Save info for later
+#write.csv(fires, "/Users/matiasluna/Library/CloudStorage/OneDrive-UniversidadedoPorto/CC4018 - Data Mining I/Projeto/newFires.csv", row.names = FALSE)
+#fires <- read_csv("newFires.csv")
+```
+
+```{r}
+########### DATA VISUALIZATION ###########
+
+########### # Number of fires that occur on each region #1 ########### 
+fires_region <- select(fires,id, region)
+
+barplot(table(fires_region$region), 
+        xlab="Region", 
+        ylab="Numberoffires",
+        main="Number of fires x region", 
+        col = "#FF9900",
+        width = 0.1,
+        ylim=c(0,4000))
+```
+
+```{r}
+########### Number of fires that occur on each region #2 ########### 
+fires_region <- fires_region %>% group_by(region) %>% count()
+colnames(fires_region)[2] ="number"
+barplot(height=fires_region$number, 
+        names=fires_region$region, 
+        main="Number of fires x region", 
+        xlab="Region", 
+        ylab="Number of fires",
+        col = "#FF9900")
+```
+
+```{r}
+########### Number of fires that occur on each region #3 (Min-Max scaling) ########### 
+fires_region_normalized <- fires_region
+normalize <- preProcess(as.data.frame(fires_region_normalized), method=c("range"))
+fires_region_normalized <- predict(normalize, as.data.frame(fires_region_normalized))
+
+barplot(height=fires_region_normalized$number, 
+        names=fires_region_normalized$region, 
+        main="Number of fires x region", 
+        xlab="Region", 
+        ylab="Number of fires",
+        col = "#FF9900")
+```
+
+```{r}
+########### Number of fires that occur on district in Entre Douro e Minho ########### 
+fires_distrito <- fires[fires$region=='Entre Douro e Minho',]
+fires_distrito <- fires_distrito %>% select(region,district) 
+fires_distrito <- fires_distrito %>% group_by(district) %>% count()
+barplot(height = fires_distrito$n,
+        names = fires_distrito$district,
+        main="District of fires in the region of  \"Entre Douro e Minho\"", 
+        ylab="Number of fires",
+        xlab="District",
+        col = "#FF9900",
+        width = 0.1,
+        ylim=c(0,1300))
+
+```
+
+```{r}
+########### Number of fires that occur on each district #1 ########### 
+fires_distrito <- select(fires,district)
+
+barplot(table(fires_distrito$district), 
+        main="Number of fires x district", 
+        ylab="Number of fires",
+        xlab="District", 
+        col = "#FF9900")
+```
+
+```{r}
+########### Number of fires that occur on each district #2 ########### 
+fires_distrito <- fires %>% group_by(district) %>% count()
+colnames(fires_distrito)[2] ="number"
+barplot(height=fires_distrito$number, 
+        names=fires_distrito$district, 
+        main="Number of fires x district", 
+        xlab="District", 
+        ylab="Number of fires",
+        col = "#FF9900")
+```
+
+```{r}
+########### Number of fires that occur on each district #3 (Min-Max scaling) ########### 
+fires_distrito_normalized <- fires_distrito
+normalize <- preProcess(as.data.frame(fires_distrito_normalized), method=c("range"))
+fires_distrito_normalized <- predict(normalize, as.data.frame(fires_distrito_normalized))
+
+barplot(height=fires_distrito_normalized$number, 
+        names=fires_distrito_normalized$district, 
+        main="Number of fires x district", 
+        xlab="District", 
+        ylab="Number of fires",
+        col = "#FF9900")
+```
+
+```{r}
+########### Number of fires that occur on each municipality #1 ########### 
+fires_municipality <- select(fires,municipality)
+
+barplot(table(fires_municipality$municipality), 
+        main="Number of fires x municipality", 
+        xlab="Municipality", 
+        ylab="Number of fires",
+        col = "#FF9900")
+```
+
+```{r}
+########### Number of fires that occur on each municipality #2 ########### 
+fires_municipality <- fires %>% group_by(municipality) %>% count()
+colnames(fires_municipality)[2] ="number"
+barplot(height=fires_municipality$number, 
+        names=fires_municipality$municipality, 
+        main="Number of fires x municipality", 
+        xlab="Municipality", 
+        ylab="Number of fires",
+        col = "#FF9900")
+```
+
+```{r}
+########### Number of fires that occur on each municipality #3 (Min-Max scaling) ########### 
+fires_municipality_normalized <- fires_municipality
+normalize <- preProcess(as.data.frame(fires_municipality_normalized), method=c("range"))
+fires_municipality_normalized <- predict(normalize, as.data.frame(fires_municipality_normalized))
+
+barplot(height=fires_municipality_normalized$number, 
+        names=fires_municipality_normalized$municipality, 
+        main="Number of fires x municipality", 
+        xlab="Municipality", 
+        ylab="Number of fires",
+        col = "#FF9900")
+
+```
+
+```{r}
+########### Number of fires that occur on each parish #1 ########### 
+fires_parish <- select(fires,parish)
+
+barplot(table(fires_parish$parish), 
+        main="Number of fires x parish", 
+        xlab="Parish", 
+        ylab="Number of fires",
+        col = "#FF9900")
+```
+
+```{r}
+########### Number of fires that occur on each parish #2 ########### 
+fires_parish <- fires %>% group_by(parish) %>% count()
+colnames(fires_parish)[2] ="number"
+barplot(height=fires_parish$number, 
+        names=fires_parish$parish, 
+        main="Number of fires x parish", 
+        xlab="Parish", 
+        ylab="Number of fires",
+        col = "#FF9900")
+```
+
+```{r}
+# Number of fires that occur on each parish #3 (Min-Max scaling)
+fires_parish_normalized <- fires_parish
+normalize <- preProcess(as.data.frame(fires_parish_normalized), method=c("range"))
+fires_parish_normalized <- predict(normalize, as.data.frame(fires_parish_normalized))
+
+barplot(height=fires_parish_normalized$number, 
+        names=fires_parish_normalized$parish, 
+        main="Number of fires x parish", 
+        xlab="Parish", 
+        ylab="Number of fires",
+        col = "#FF9900")
+
+
+
+# Por um threshold para mostrar os que têm mais tendencia a incendiar.
+
+
+
+
+```
+
+```{r}
+########### Fires by intentional cause #############  
+
+fires_intentional_cause <- fires %>% group_by(intentional_cause) %>% count()
+fires_intentional_cause$intentional_cause[fires_intentional_cause$intentional_cause == 0] <- 'No'
+fires_intentional_cause$intentional_cause[fires_intentional_cause$intentional_cause == 1] <- 'Yes'
+fires_intentional_cause$intentional_cause <- as.factor(fires_intentional_cause$intentional_cause)
+
+colnames(fires_intentional_cause)[2] ="number"
+
+barplot(height=fires_intentional_cause$number, 
+        names=fires_intentional_cause$intentional_cause,
+        main="Number of fires x intentional cause", 
+        xlab="Intentional cause", 
+        ylab="Number of fires",
+        col = "#FF0000",
+        width = 0.1,
+        ylim=c(0,8000))
+
+```
+
+```{r}
+########### Fires by intentional cause x region #############  
+fires_intentional_cause <- fires %>% group_by(intentional_cause,region) %>% count()
+fires_intentional_cause$intentional_cause[fires_intentional_cause$intentional_cause == 0] <- 'No'
+fires_intentional_cause$intentional_cause[fires_intentional_cause$intentional_cause == 1] <- 'Yes'
+fires_intentional_cause$intentional_cause <- as.factor(fires_intentional_cause$intentional_cause)
+
+ggplot(fires_intentional_cause,aes(x=region,y=n,colour = intentional_cause))  + geom_point() + 
+  ggtitle("Intentional cause of fires organized by region") + xlab("Region") + ylab("Number of fires") + labs(colour = "Intentional cause")
+```
+
+```{r}
+########### Fires by intentional cause x region (2 barras na mesma) #############  
+fires_intentional_cause <- fires %>% group_by(region,intentional_cause) %>% count()
+fires_intentional_cause$intentional_cause[fires_intentional_cause$intentional_cause == 0] <- 'No'
+fires_intentional_cause$intentional_cause[fires_intentional_cause$intentional_cause == 1] <- 'Yes'
+fires_intentional_cause$intentional_cause <- as.factor(fires_intentional_cause$intentional_cause)
+
+ggplot(fires_intentional_cause, aes(region,n, fill = intentional_cause)) + geom_col() + 
+  ggtitle("Intentional cause of fires organized by region") + xlab("Region") + ylab("Number of fires") + labs(fill = "Intentional cause")
+```
+
+```{r}
+########### Fires by intentional cause x region (2 barras na mesma) Normalized #############  
+
+fires_region_normalized <- fires_intentional_cause
+normalize <- preProcess(as.data.frame(fires_region_normalized), method=c("range"))
+fires_region_normalized <- predict(normalize, as.data.frame(fires_region_normalized))
+
+ggplot(fires_region_normalized, aes(region,n, fill = intentional_cause)) + geom_col() + 
+  ggtitle("Intentional cause of fires organized by region") + xlab("Region") + ylab("Number of fires") + labs(fill = "Intentional cause")
+```
+
+```{r}
+########### Fires by intentional cause x origin x region #############  
+fires_intentional_cause <- fires %>% group_by(intentional_cause,region, origin) %>% count()
+fires_intentional_cause$intentional_cause[fires_intentional_cause$intentional_cause == 0] <- 'No'
+fires_intentional_cause$intentional_cause[fires_intentional_cause$intentional_cause == 1] <- 'Yes'
+fires_intentional_cause$intentional_cause <- as.factor(fires_intentional_cause$intentional_cause)
+
+ggplot(fires_intentional_cause,aes(x=region,y=n,colour = intentional_cause, shape=origin))  + geom_point() + 
+  ggtitle("Intentional cause and origin of fires organized by region") + xlab("Region") + ylab("Number of fires") + labs(colour = "Intentional cause", shape="Origin")
+```
+
+```{r}
+########### Fires by origin x region (2 barras) #############  
+
+fires_intentional_cause <- fires %>% group_by(region,origin) %>% count()
+fires_intentional_cause$origin <- as.factor(fires_intentional_cause$origin)
+
+ggplot(fires_intentional_cause, aes(region,n, fill = origin)) + geom_col() + 
+  ggtitle("Origin of fires organized by region") + xlab("Region") + ylab("Number of fires") + labs(colour = "Origin")
+```
+
+```{r}
+########### Fires by origin #############  
+fires_origin <- fires %>% group_by(origin) %>% count()
+colnames(fires_origin)[2] ="number"
+
+barplot(height=fires_origin$number, 
+        names=fires_origin$origin,
+        main="Number of fires x origin", 
+        xlab="Origin", 
+        ylab="Number of fires",
+        col = "#FF0000")
+```
+
+```{r}
+
+########### Fires by origin x region #############  
+fires_origin <- fires %>% group_by(region,origin) %>% count()
+
+ggplot(fires_origin,aes(x=region,y=n,colour = origin))  + geom_point() + 
+  ggtitle("Number of fires x origin x region") + xlab("Region") + ylab("Number of fires") + labs(colour = "Origin")
+```
+
+```{r}
+########### Fires and their Average temperature x region ########### 
+
+fires_temperature <- fires %>% select(id,region,TemperatureCAvg)
+
+ggplot(fires_temperature,aes(x=region,y=TemperatureCAvg)) + geom_boxplot() + 
+  ggtitle("Average temperature of fires x region") + xlab("Region") + ylab("Average Temperature")
+
+ggplot(fires_temperature,aes(x=region,y=TemperatureCAvg)) + geom_point() + 
+  ggtitle("Average temperature of fires x region") + xlab("Region") + ylab("Average Temperature")
+```
+
+```{r}
+########### Fires and their Average temperature x region x intentional cause ########### 
+fires_temperature <- fires %>% select(id,region,TemperatureCAvg,intentional_cause)
+fires_temperature$intentional_cause <- as.factor(fires_temperature$intentional_cause)
+
+ggplot(fires_temperature,aes(x=region,y=TemperatureCAvg,colour=intentional_cause)) + geom_boxplot() + 
+  ggtitle("Average temperature of fires x region") + xlab("Region") + ylab("Average Temperature")
+
+ggplot(fires_temperature,aes(x=region,y=TemperatureCAvg,colour=intentional_cause)) + geom_point() + 
+  ggtitle("Average temperature of fires x region") + xlab("Region") + ylab("Average Temperature")
+```
+
+```{r}
+########### Fires and their Average temperature x region x intentional cause x origin ########### 
+fires_temperature <- fires %>% select(id,region,TemperatureCAvg,intentional_cause, origin)
+fires_temperature$intentional_cause <- as.factor(fires_temperature$intentional_cause)
+
+ggplot(fires_temperature,aes(x=region,y=TemperatureCAvg,colour=intentional_cause, shape=origin)) + geom_point() + 
+  ggtitle("Average temperature of fires x region") + xlab("Region") + ylab("Average Temperature")
+```
+
+```{r}
+########### Fires and their Average Wind x region ########### 
+
+fires_wind <- fires %>% select(id,region,WindkmhInt)
+
+ggplot(fires_wind,aes(x=region,y=WindkmhInt)) + geom_boxplot() + 
+  ggtitle("Average wind of fires x region") + xlab("Region") + ylab("Average Wind")
+
+ggplot(fires_wind,aes(x=region,y=WindkmhInt)) + geom_point() + 
+  ggtitle("Average wind of fires x region") + xlab("Region") + ylab("Average Wind")
+```
+
+```{r}
+########### Fires and their Average Wind x region x intentional cause ########### 
+fires_wind <- fires %>% select(id,region,WindkmhInt,intentional_cause)
+fires_wind$intentional_cause <- as.factor(fires_wind$intentional_cause)
+
+ggplot(fires_wind,aes(x=region,y=WindkmhInt,colour=intentional_cause)) + geom_boxplot() + 
+  ggtitle("Average wind of fires x region") + xlab("Region") + ylab("Average Wind")
+
+ggplot(fires_wind,aes(x=region,y=WindkmhInt,colour=intentional_cause)) + geom_point() + 
+  ggtitle("Average wind of fires x region") + xlab("Region") + ylab("Average Wind")
+
+########### Fires and their Average Wind x region x intentional cause x origin ########### 
+fires_wind <- fires %>% select(id,region,WindkmhInt,intentional_cause, origin)
+fires_wind$intentional_cause <- as.factor(fires_wind$intentional_cause)
+
+ggplot(fires_wind,aes(x=region,y=WindkmhInt,colour=intentional_cause, shape=origin)) + geom_point() + 
+  ggtitle("Average wind of fires x region") + xlab("Region") + ylab("Average Wind")
+
+```
+
+```{r}
+########### Minutos entre alert_date and first_intervension ########### 
+
+time_frame <- c("Menos do que 15","Mais do que 15")
+time <- c(NA,NA)
+fires_alter_interv_less_1 <- data.frame(time_frame, time)
+as_tibble(fires_alter_interv_less_1 )
+
+valor <- fires %>% filter(fires$diff_alert_hour_firstInterv_hour_minute <= 15) %>% count()
+fires_alter_interv_less_1$time[fires_alter_interv_less_1$time_frame=='Menos do que 15'] <- valor$n
+valor <- fires %>% filter(fires$diff_alert_hour_firstInterv_hour_minute > 15) %>% count()
+fires_alter_interv_less_1$time[fires_alter_interv_less_1$time_frame=='Mais do que 15'] <- valor$n
+
+barplot(height=fires_alter_interv_less_1$time, 
+        names=fires_alter_interv_less_1$time_frame, 
+        main="Minutos entre Alert Date and First Intervension", 
+        xlab="Minutos", 
+        ylab="Number of fires",
+        col = "#FF9900")
+
+```
+
+```{r}
+
+########### # horas para os intencionais e uns para não intencionais ########### 
+fires_hours_to_kill <- fires %>% select(id, diff_alert_hour_extinction_hour_hours,intentional_cause)
+
+fires_hours_to_kill$diff_alert_hour_extinction_hour_hours <-round(fires_hours_to_kill$diff_alert_hour_extinction_hour_hours,0)
+fires_hours_to_kill <- fires_hours_to_kill %>% group_by(diff_alert_hour_extinction_hour_hours,intentional_cause) %>% count()
+
+fires_hours_to_kill$intentional_cause <- as.factor(fires_hours_to_kill$intentional_cause)
+
+ggplot(fires_hours_to_kill,aes(x=diff_alert_hour_extinction_hour_hours,y=n,colour=intentional_cause)) + geom_point() + 
+  ggtitle("Hours to kill fires x intentional cause") + xlab("Hours") + ylab("Number of fires") + labs(colour="Intentional cause")
+
+```
+
+```{r}
+########### Horas que tomou acabar com um incendio ########### 
+
+time_frame <- c("menos de 1","entre 1 e 2", "entre 2 e 3", "mais de 3")
+time <- c(NA,NA, NA,NA)
+fires_less_than24 <- data.frame(time_frame, time)
+as_tibble(fires_less_than24 )
+
+valor <- fires %>% filter(fires$diff_alert_hour_extinction_hour_hours <= 1) %>% count()
+fires_less_than24$time[fires_less_than24$time_frame=='menos de 1'] <- valor$n
+valor <- fires %>% filter(fires$diff_alert_hour_extinction_hour_hours > 1 & fires$diff_alert_hour_extinction_hour_hours <= 2) %>% count()
+fires_less_than24$time[fires_less_than24$time_frame=='entre 1 e 2'] <- valor$n
+valor <- fires %>% filter(fires$diff_alert_hour_extinction_hour_hours > 2 & fires$diff_alert_hour_extinction_hour_hours <= 3) %>% count()
+fires_less_than24$time[fires_less_than24$time_frame=='entre 2 e 3'] <- valor$n
+valor <- fires %>% filter(fires$diff_alert_hour_extinction_hour_hours > 3) %>% count()
+fires_less_than24$time[fires_less_than24$time_frame=='mais de 3'] <- valor$n
+
+barplot(height=fires_less_than24$time, 
+        names=fires_less_than24$time_frame, 
+        main="Horas que tomou acabar com um incendio",
+        xlab="Horas", 
+        ylab="Number of fires",
+        col = "#FF9900")
+
+```
+
+```{r}
+
+########### Em que meses do ano / meses / dias / horas acontecem mais fogos ########### 
+
+fires$alert_date_y <- NA
+fires$alert_date_m <- NA
+fires$alert_date_d <- NA
+fires$alert_date_h <- NA
+
+for (i in 1:9999) {
+  fires$alert_date[i] <- as.Date(fires$alert_date[i])
+  fires$alert_date_y[i] <- as.numeric(format(fires$alert_date[i], format = "%Y"))
+  fires$alert_date_m[i] <- as.numeric(format(fires$alert_date[i], format = "%m"))
+  fires$alert_date_d[i] <- as.numeric(format(fires$alert_date[i], format = "%d"))
+  fires$alert_date_h[i] <- as.numeric(format(as.POSIXct(fires$alert_hour[i]), format = "%H"))
+}  
+
+fires_years <- fires %>% group_by(alert_date_y) %>% count()
+fires_months <- fires %>% group_by(alert_date_m) %>% count()
+fires_days <- fires %>% group_by(alert_date_d) %>% count()
+fires_hours <- fires %>% group_by(alert_date_h) %>% count() 
+
+barplot(height=fires_years$n,
+        names=fires_years$alert_date_y,
+        main="Years when fires took place",
+        xlab="Years",
+        ylab="Number of fires",
+        col = "#FFFF00")
+
+fires_months$alert_date_m[fires_months$alert_date_m == 1] <- 'Jan'
+fires_months$alert_date_m[fires_months$alert_date_m == 2] <- 'Feb'
+fires_months$alert_date_m[fires_months$alert_date_m == 3] <- 'Mar'
+fires_months$alert_date_m[fires_months$alert_date_m == 4] <- 'Apr'
+fires_months$alert_date_m[fires_months$alert_date_m == 5] <- 'May'
+fires_months$alert_date_m[fires_months$alert_date_m == 6] <- 'Jun'
+fires_months$alert_date_m[fires_months$alert_date_m == 7] <- 'Jul'
+fires_months$alert_date_m[fires_months$alert_date_m == 8] <- 'Aug'
+fires_months$alert_date_m[fires_months$alert_date_m == 9] <- 'Sep'
+fires_months$alert_date_m[fires_months$alert_date_m == 10] <- 'Oct'
+fires_months$alert_date_m[fires_months$alert_date_m == 11] <- 'Nov'
+fires_months$alert_date_m[fires_months$alert_date_m == 12] <- 'Dec'
+
+barplot(height=fires_months$n,
+        names=fires_months$alert_date_m,
+        main="Months when fires took place",
+        xlab="Months",
+        ylab="Number of fires",
+        col = "#FFFF00",
+        width = 0.1,
+        ylim=c(0,2300))
+
+barplot(height=fires_days$n,
+        names=fires_days$alert_date_d,
+        main="Days when fires took place",
+        xlab="Days",
+        ylab="Number of fires",
+        col = "#FFFF00")
+
+barplot(height=fires_hours$n,
+        names=fires_hours$alert_date_h,
+        main="Hours of the day when fires took place",
+        xlab="Hour of the day",
+        ylab="Number of fires",
+        col = "#FFFF00",
+        width = 0.1,
+        ylim=c(0,1000))
+```
+
+```{r}
+
+########### Hours of the day and months when fires took place ########### 
+
+fires_hours <- fires %>% group_by(alert_date_h,alert_date_m) %>% count() 
+fires_hours$alert_date_h <- as.factor(fires_hours$alert_date_h)
+
+fires_hours$alert_date_m[fires_hours$alert_date_m == 1] <- 'Jan'
+fires_hours$alert_date_m[fires_hours$alert_date_m == 2] <- 'Feb'
+fires_hours$alert_date_m[fires_hours$alert_date_m == 3] <- 'Mar'
+fires_hours$alert_date_m[fires_hours$alert_date_m == 4] <- 'Apr'
+fires_hours$alert_date_m[fires_hours$alert_date_m == 5] <- 'May'
+fires_hours$alert_date_m[fires_hours$alert_date_m == 6] <- 'Jun'
+fires_hours$alert_date_m[fires_hours$alert_date_m == 7] <- 'Jul'
+fires_hours$alert_date_m[fires_hours$alert_date_m == 8] <- 'Aug'
+fires_hours$alert_date_m[fires_hours$alert_date_m == 9] <- 'Sep'
+fires_hours$alert_date_m[fires_hours$alert_date_m == 10] <- 'Oct'
+fires_hours$alert_date_m[fires_hours$alert_date_m == 11] <- 'Nov'
+fires_hours$alert_date_m[fires_hours$alert_date_m == 12] <- 'Dec'
+fires_hours$alert_date_m <- as.factor(fires_hours$alert_date_m)
+
+ggplot(fires_hours, aes(alert_date_h,n, fill = alert_date_m)) + geom_col() + 
+  ggtitle("Hours of the day and months when fires took place") + xlab("Hour of the day") + ylab("Number of fires") + labs(fill = "Months")
+```
+
+```{r}
+########### Intentional Cause of Fires on each month ########### 
+
+fires_months_intention <- fires %>% group_by(alert_date_m,intentional_cause) %>% count()
+fires_months_intention$alert_date_m <- as.factor(fires_months_intention$alert_date_m)
+fires_months_intention$intentional_cause <- as.factor(fires_months_intention$intentional_cause)
+
+ggplot(fires_months_intention,aes(x=alert_date_m,y=n,colour=intentional_cause)) + geom_point() + 
+  ggtitle("Intentional Cause of Fires on each month") + xlab("Months of the year") + ylab("Number of fires") + labs(colour="Intentional cause")
+
+```
+
+```{r}
+########### Origin of fires on each month ########### 
+
+fires_months_origin <- fires %>% group_by(alert_date_m,origin) %>% count()
+fires_months_origin$alert_date_m <- as.factor(fires_months_origin$alert_date_m)
+
+ggplot(fires_months_origin,aes(x=alert_date_m,y=n,colour=origin)) + geom_point() +
+  ggtitle("Origin of fires on each month") + xlab("Months of the year") + ylab("Number of fires") + labs(colour="Origin")
+```
+
+```{r}
+########### Origin and intentional cause of fires on each month ########### 
+
+fires_months_origin_intentional <- fires %>%  group_by(origin,alert_date_m,intentional_cause) %>% count()
+
+fires_months_origin_intentional <- fires_months_origin_intentional %>% arrange(desc(alert_date_m))
+
+fires_months_origin_intentional$alert_date_m[fires_months_origin_intentional$alert_date_m == 1] <- 'Jan'
+fires_months_origin_intentional$alert_date_m[fires_months_origin_intentional$alert_date_m == 2] <- 'Feb'
+fires_months_origin_intentional$alert_date_m[fires_months_origin_intentional$alert_date_m == 3] <- 'Mar'
+fires_months_origin_intentional$alert_date_m[fires_months_origin_intentional$alert_date_m == 4] <- 'Apr'
+fires_months_origin_intentional$alert_date_m[fires_months_origin_intentional$alert_date_m == 5] <- 'May'
+fires_months_origin_intentional$alert_date_m[fires_months_origin_intentional$alert_date_m == 6] <- 'Jun'
+fires_months_origin_intentional$alert_date_m[fires_months_origin_intentional$alert_date_m == 7] <- 'Jul'
+fires_months_origin_intentional$alert_date_m[fires_months_origin_intentional$alert_date_m == 8] <- 'Aug'
+fires_months_origin_intentional$alert_date_m[fires_months_origin_intentional$alert_date_m == 9] <- 'Sep'
+fires_months_origin_intentional$alert_date_m[fires_months_origin_intentional$alert_date_m == 10] <- 'Oct'
+fires_months_origin_intentional$alert_date_m[fires_months_origin_intentional$alert_date_m == 11] <- 'Nov'
+fires_months_origin_intentional$alert_date_m[fires_months_origin_intentional$alert_date_m == 12] <- 'Dec'
+fires_months_origin_intentional$alert_date_m <- as.factor(fires_months_origin_intentional$alert_date_m)
+
+fires_months_origin_intentional$alert_date_m <- as.factor(fires_months_origin_intentional$alert_date_m)
+
+fires_months_origin_intentional$intentional_cause[fires_months_origin_intentional$intentional_cause == 0] <- 'No'
+fires_months_origin_intentional$intentional_cause[fires_months_origin_intentional$intentional_cause == 1] <- 'Yes'
+
+fires_months_origin_intentional$intentional_cause <- as.factor(fires_months_origin_intentional$intentional_cause)
+
+ggplot(fires_months_origin_intentional,aes(x=alert_date_m,y=n,shape=origin,colour=intentional_cause)) + geom_point() + ylim(c(0,800)) +
+  ggtitle("Origin and intentional cause of fires on each month") + xlab("Months of the year") + ylab("Number of fires") + labs(colour="Intentional cause", shape="Origin")
+
+```
+
+```{r}
+########### Intentional Cause of Fires during the day ########### 
+
+fires_hours_intention <- fires %>% group_by(alert_date_h,intentional_cause) %>% count()
+fires_hours_intention$intentional_cause <- as.factor(fires_hours_intention$intentional_cause)
+fires_hours_intention$alert_date_h <- as.factor(fires_hours_intention$alert_date_h)
+
+ggplot(fires_hours_intention,aes(x=alert_date_h,y=n,colour=intentional_cause)) + geom_point() + 
+  ggtitle("Intentional Cause of Fires during the day") + xlab("Hours of the day") + ylab("Number of fires") + labs(colour="Intentional cause")
+
+ggplot(fires_hours_intention, aes(alert_date_h,n, fill = intentional_cause)) + geom_col() + 
+  ggtitle("Intentional Cause of Fires during the day") + xlab("Hours of the day") + ylab("Number of fires") + labs(fill="Intentional cause")
+
+```
+
+```{r}
+########### Origin of fires during the day  ########### 
+
+fires_hours_origin <- fires %>% group_by(alert_date_h,origin) %>% count()
+
+ggplot(fires_hours_origin,aes(x=alert_date_h,y=n,colour=origin)) + geom_point() + 
+  ggtitle("Origin of fires during the day") + xlab("Hours of the day") + ylab("Number of fires") + labs(colour="Origin")
+```
+
+```{r}
+
+########### Origin and intentional cause of fires during the day  ########### 
+
+fires_hours_origin_intentional <- fires %>% group_by(alert_date_h,origin, intentional_cause) %>% count()
+fires_hours_origin_intentional$intentional_cause <- as.factor(fires_hours_origin_intentional$intentional_cause)
+
+ggplot(fires_hours_origin_intentional,aes(x=alert_date_h,y=n,shape=origin,colour=intentional_cause)) + geom_point() + 
+  ggtitle("Origin and intentional cause of fires during the day") + xlab("Hours of the day") + ylab("Number of fires") + labs(colour="Intentional cause", shape="Origin")
+
+```
+
+```{r}
+
+########### Relation between intentional_cause and origin. ########### 
+fires_intention_origin <- fires %>% select(id, origin, intentional_cause)
+fires_intention_origin <- fires_intention_origin %>% group_by(intentional_cause,origin) %>% count()
+
+fires_intention_origin$intentional_cause[fires_intention_origin$intentional_cause == 0] <- 'No'
+fires_intention_origin$intentional_cause[fires_intention_origin$intentional_cause == 1] <- 'Yes'
+fires_intention_origin$intentional_cause <- as.factor(fires_intention_origin$intentional_cause)
+
+ggplot(fires_intention_origin,aes(x=origin,y=n, colour=intentional_cause))  + geom_point() + 
+  ggtitle("Number of fires x intentional cause x region") + xlab("Origin") + ylab("Number of fires") + labs(colour="Intentional Cause")
+
+ggplot(fires_intention_origin, aes(origin,n, fill = intentional_cause)) + geom_col() + ylim(c(0,6000)) + 
+  ggtitle("Intentional cause and origin of fires ") + xlab("Origin") + ylab("Number of fires") + labs(fill="Intentional Cause")
+
+
+```
+
+```{r}
+
+
+########### Region of the 50 fires that burned the most land ########### 
+fires_area <- fires %>%                                      
+  arrange(desc(total_area)) %>% 
+  group_by(total_area) %>%
+  head(50)
+
+fires_area$intentional_cause <- as.factor(fires_area$intentional_cause)
+
+ggplot(fires_area,aes(x=region,y=total_area)) + geom_point() + 
+  ggtitle("Region of the 50 fires that burned the most land") + xlab("Region") + ylab("Total area") + labs(colour="Intentional cause")
+```
+
+```{r}
+########### Region and intentional cause of the 50 fires that burned the most land ########### 
+fires_area <- fires %>%                                      
+  arrange(desc(total_area)) %>% 
+  group_by(total_area) %>%
+  head(50)
+
+fires_area$intentional_cause <- as.factor(fires_area$intentional_cause)
+
+ggplot(fires_area,aes(x=region,y=total_area,colour=intentional_cause)) + geom_point() + 
+  ggtitle("Region and intentional cause of the 50 fires that burned the most land") + xlab("Region of fires") + ylab("Total area") + labs(colour="Intentional cause")
+```
+
+```{r}
+########### Region, intentional cause and origin of the 50 fires that burned the most land ########### 
+fires_area <- fires %>%                                      
+  arrange(desc(total_area)) %>% 
+  group_by(total_area) %>%
+  head(50)
+
+fires_area$intentional_cause <- as.factor(fires_area$intentional_cause)
+
+ggplot(fires_area,aes(x=region,y=total_area,colour=intentional_cause,shape=origin)) + geom_point() + ylim(c(0,5000)) +
+  ggtitle("Region and intentional cause of the 50 fires that burned the most land") + xlab("Region") + ylab("Total area burned") + labs(colour="Intentional cause",shape="Origin")
+```
+
+```{r}
+
+
+########### Amount of total_area burned by the fires per region ########### 
+fires_area_total <- fires %>% select(region,total_area)
+fires_area_total <- fires_area_total %>% group_by(region) %>% summarise(sum(total_area,na.rm = TRUE)) 
+colnames(fires_area_total)[2] ="total_area"
+fires_area_total$total_area <- as.double(fires_area_total$total_area)
+
+barplot(height=fires_area_total$total_area, 
+        names=fires_area_total$region, 
+        main="Amount of total_area burned by the fires per region", 
+        xlab="Region", 
+        ylab="Total area burned",
+        col = "#FF9900",
+        width = 0.1,
+        ylim=c(0,17000))
+
+```
+
+# Data Preparation
+
+```{r}
+# Libraries
+library(readr)
+library(tidymodels)
+library(tidyverse)
+
+# Set Directory
+setwd("D:/Filipa/Documents/Filipa/Universidade/CompSci/Data Mining I/Assignment/")
+
+# Read file
+fires <- read_csv('fires_train.csv')
+#str(fires)
+#summary(fires)
+#View(fires)
+
+# View important information about possible and missing values
+for (col in colnames(fires)) {
+  print(col)
+  #print(unique(fires[,col]))
+  #print(which(is.na(fires[,col])))
+  print(sum(is.na(fires[,col])))
+}
+```
+## Removing Variables
+
+```{r}
+# Remove 'alert_source' --> (NA's:10309)
+fires <- select(fires, -(alert_source))
+
+# Remove 'extinction_hour' --> Not necessary
+fires <- select(fires, -(extinction_hour))
+
+# Remove 'firstInterv_hour' --> Not necessary
+fires <- select(fires, -(firstInterv_hour))
+
+```
+
+## District and Region Columns
+
+```{r}
+# Two Possible Values for district Viana do Castelo
+fires$district[(fires$district=='Viana Do Castelo')] <- 'Viana do Castelo'
+
+# Fill Missing Region values
+fires$region[(fires$region=='-' & fires$district=='Aveiro')] <- 'Beira Litoral'
+fires$region[(fires$region=='-' & fires$district=='Coimbra')] <- 'Beira Litoral'
+fires$region[(fires$region=='-' & fires$district=='Leiria')] <- 'Beira Litoral'
+fires$region[(fires$region=='-' & fires$district=='Viseu')] <- 'Beira Litoral'
+fires$region[(fires$region=='-' & fires$district=='Castelo Branco')] <- 'Beira Interior'
+fires$region[(fires$region=='-' & fires$district=='Guarda')] <- 'Beira Interior'
+fires$region[(fires$region=='-' & fires$district=='Santarém')] <- 'Ribatejo e Oeste'
+fires$region[(fires$region=='-' & fires$district=='Faro')] <- 'Algarve'
+fires$region[(fires$region=='-' & fires$district=='Bragança')] <- 'Trás-os-Montes'
+fires$region[(fires$region=='-' & fires$district=='Vila Real')] <- 'Trás-os-Montes'
+fires$region[(fires$region=='-' & fires$district=='Viana do Castelo')] <- 'Entre Douro e Minho'
+fires$region[(fires$region=='-' & fires$district=='Braga')] <- 'Entre Douro e Minho'
+fires$region[(fires$region=='-' & fires$district=='Porto')] <- 'Entre Douro e Minho'
+fires$region[(fires$region=='-' & fires$district=='Beja')] <- 'Alentejo'
+fires$region[(fires$region=='-' & fires$district=='Évora')] <- 'Alentejo'
+fires$region[(fires$region=='-' & fires$district=='Portalegre')] <- 'Alentejo'
+fires$region[(fires$region=='-' & fires$district=='Lisboa')] <- 'Lisboa e Vale do Tejo'
+fires$region[(fires$region=='-' & fires$district=='Setúbal')] <- 'Lisboa e Vale do Tejo'
+
+# Handling the Missing Value
+fires$district[fires$id[(is.na(fires$region))]] #Setúbal
+fires$region[is.na(fires$region)] <- 'Lisboa e Vale do Tejo'
+```
+
+## Lat and Lon Columns
+
+```{r}
+#################################################################################################################################
+# Corrigir erros nas coordenadas
+# Substituir ',', por '.' em valores
+fires$lat <- chartr(',', '.', fires$lat)
+fires$lon <- chartr(',', '.', fires$lon)
+
+#################################################################################################################################
+# Valores de coordenadas todas na mesma forma
+fires$lat <- chartr('º', ':', fires$lat)
+fires$lat <- chartr("'", ':', fires$lat)
+fires$lat <- gsub('::', '', fires$lat)
+
+fires$lon <- chartr('º', ':', fires$lon)
+fires$lon <- chartr("'", ':', fires$lon)
+fires$lon <- gsub('::', '', fires$lon)
+
+#################################################################################################################################
+# Valores de coordenadas na forma DMS
+fires$lat <- sub(':','º',fires$lat)
+fires$lat <- sub(':',"'",fires$lat)
+#fires$lat <- paste0(fires$lat, "''")
+
+fires$lon <- sub(':','º',fires$lon)
+fires$lon <- sub(':',"'",fires$lon)
+#fires$lon <- paste0(fires$lon, "''")
+
+#################################################################################################################################
+# Valores de coordenadas de DMS para DD
+# Criar nova coluna com horas da latitude
+horasLat <- unlist(gregexpr("º", fires$lat)) 
+fires$horasLat <- substring(fires$lat, first=1, last=horasLat - 1)
+# Criar nova coluna com minutos da latitude
+minLat <- unlist(gregexpr("'", fires$lat)) # retornar posição com aquele caracter
+fires$minLat <- substring(fires$lat, first=horasLat + 1, last=minLat - 1)
+# Criar nova coluna com segundos da latitude
+segLat <- length(fires$lat)
+fires$segLat <- substring(fires$lat, first=minLat + 1, last=segLat)
+
+# mudar o tipo das colunas 19, 20 e 21 de character para integer
+fires[c(19, 20, 21)] <- lapply(fires[c(19, 20, 21)], as.integer) 
+typeof(fires$segLat)
+# alterar lat para DD
+for (i in 1:10309) {
+  if(!is.na(fires[i, 19]) & !is.na(fires[i, 20]) & !is.na(fires[i, 21])){
+    latValue <- fires[i, 19] + (fires$minLat[!is.na(fires[i, 20])]/60) + (fires[i, 21]/3600)
+    # Converter de double para string
+    fires[i, 6]<- toString(latValue)
+  }
+}
+
+# Criar nova coluna com horas da longitude
+horasLon <- unlist(gregexpr("º", fires$lon)) # retorna posição deste caracter
+fires$horasLon <- substring(fires$lon, first=1, last=horasLon - 1)
+# Criar nova coluna com minutos da latitude
+minLon <- unlist(gregexpr("'", fires$lon)) # retornar posição com aquele caracter
+fires$minLon <- substring(fires$lon, first=horasLon + 1, last=minLon - 1)
+# Criar nova coluna com segundos da latitude
+segLon <- length(fires$lon)
+fires$segLon <- substring(fires$lon, first=minLon + 1, last=segLon)
+
+# mudar o tipo das colunas 22, 23 e 24 de character para integer
+fires[c(22, 23, 24)] <- lapply(fires[c(22, 23, 24)], as.integer) 
+typeof(fires$segLon)
+# alterar lat para DD
+for (i in 1:10309) {
+  if(!is.na(fires[i, 22]) & !is.na(fires[i, 23]) & !is.na(fires[i, 24])){
+    lonValue <- (fires[i, 22] + (fires$minLat[!is.na(fires[i, 23])]/60) + (fires[i, 24]/3600))*(-1)
+    # Converter de double para string
+    fires[i, 7]<- toString(lonValue)
+  }
+  if(is.na(fires[i, 22]) | is.na(fires[i, 23]) | is.na(fires[i, 24])){
+    val <- fires[i, 7]
+    value <- as.double(val)
+    value <- value*(-1)
+    fires[i, 7] <- toString(value)
+  }
+}
+
+```
+
+
+## Handling More Variables
+
+```{r}
+# Retirar hora de 'alert_date' e 'firstInterv_date'
+fires$alert_date <- substring(fires$alert_date, first=1, last=10)
+fires$firstInterv_date <- substring(fires$firstInterv_date, first=1, last=10)
+
+# Tratar missing values em 'firstInterv_date', passando-lhes os respetivos valores em 'alert_date'
+fires$firstInterv_date[(is.na(fires$firstInterv_date))] <- fires$alert_date[(is.na(fires$firstInterv_date))]
+
+# Preecher missing values em 'extinction_date'
+fires$alert_date = as.Date(fires$alert_date)
+fires$extinction_date = as.Date(fires$extinction_date)
+
+
+fires$diff_in_days = abs(as.numeric(difftime(fires$alert_date, fires$extinction_date, units = "days"))) 
+meanDifference <- mean(fires$diff_in_days, na.rm=TRUE)
+# Como meanDifference = 0.96..., a diferença será de um dia.
+
+# Atribuir a missing values de 'extinction_date' o valor de 'alert_date'+1
+fires$extinction_date[is.na(fires$extinction_date)] <- fires$alert_date[is.na(fires$extinction_date)] + 1
+```
+
+
+## Relative Values for Areas
+
+```{r}
+fires$village_area <- fires$village_area/fires$total_area
+fires$vegetation_area <- fires$vegetation_area/fires$total_area
+fires$farming_area <- fires$farming_area/fires$total_area
+fires$village_veget_area <- fires$village_veget_area/fires$total_area
+
+fires$village_area[(is.na(fires$village_area))] <- 0
+fires$vegetation_area[(is.na(fires$vegetation_area))] <- 0
+fires$farming_area[(is.na(fires$farming_area))] <- 0
+fires$village_veget_area[(is.na(fires$village_veget_area))] <- 0
+
+```
+
+
+## Creating More Variables
+
+```{r}
+#install.packages("remotes")
+library(remotes)
+#install_github("bczernecki/climate")
+library(climate)
+
+fires[c(9)] <- lapply(fires[c(9)], as.character)
+
+columns= c("Id", "station_ID","Date","TemperatureCAvg","TemperatureCMax","TemperatureCMin", "WindkmhDir", "WindkmhGust", "WindkmhInt")
+# pass this vector length to ncol parameter
+# and nrow with 0
+meteo = data.frame(matrix(nrow = 0, ncol = length(columns)))
+
+# assign column names
+colnames(meteo) = columns
+
+# display
+print(meteo)
+
+# lon = -8.471944
+# lat = 42.01361
+# data ="2014-01-11"
+lon = fires[2, 7]
+lat = fires[2, 6]
+data = fires[2, 9]
+data <- toString(data)
+id = fires[2, 1]
+
+# get the nearest station
+nearest_station <-nearest_stations_ogimet(country = "Portugal",
+                                          date = Sys.Date(),
+                                          add_map = FALSE,
+                                          point = c(lon, lat),
+                                          no_of_stations = 1
+)
+
+# scrap meteorological data from Ogimet regarding a period and a specific station
+meteo_data <- meteo_ogimet(date=data,
+                           interval="daily",station=nearest_station$wmo_id)
+
+# add a row to students_df
+meteo = rbind(meteo, data.frame("Id"=id, "station_ID"=meteo_data$station_ID, "Date"=meteo_data$Date, "TemperatureCAvg"=meteo_data$TemperatureCAvg,
+                                "TemperatureCMax"=meteo_data$TemperatureCMax, "TemperatureCMin"=meteo_data$TemperatureCMin,
+                                "WindkmhDir"=meteo_data$WindkmhDir, "WindkmhGust"=meteo_data$WindkmhGust, "WindkmhInt"=meteo_data$WindkmhInt))
+
+for(i in 1:10309) {       
+  # Specifying expression
+  #print(fires[i, 7])
+  lon = fires[i, 7]
+  lat = fires[i, 6]
+  data = fires[i, 9]
+  data <- toString(data)
+  id = fires[i, 1]
+  # get the nearest station
+  tryCatch(               
+    # Specifying expression
+    expr = {                     
+      nearest_station <-nearest_stations_ogimet(country = "Portugal",
+                                                date = Sys.Date(),
+                                                add_map = FALSE,
+                                                point = c(lon, lat),
+                                                no_of_stations = 1
+      )
+      # scrap meteorological data from Ogimet regarding a period and a specific station
+      meteo_data <- meteo_ogimet(date=data,
+                                 interval="daily",station=nearest_station$wmo_id)
+      # add a row to students_df
+      meteo = rbind(meteo, data.frame("Id"=id, "station_ID"=meteo_data$station_ID, "Date"=meteo_data$Date, "TemperatureCAvg"=meteo_data$TemperatureCAvg,
+                                      "TemperatureCMax"=meteo_data$TemperatureCMax, "TemperatureCMin"=meteo_data$TemperatureCMin, 
+                                      "WindkmhDir"=meteo_data$WindkmhDir, "WindkmhGust"=meteo_data$WindkmhGust, "WindkmhInt"=meteo_data$WindkmhInt))
+      rm(nearest_station)
+      rm(meteo_data)
+      print("Everything was fine.")
+    },
+    error = function(e){         
+      print("There was an error message.")
+    }
+  )
+}
+
+################################################################################################################################
+# Criar variáveis "temp" -> temperatura e "windVelocity"
+# mudar o tipo da coluna 9 para character
+fires[c(9)] <- lapply(fires[c(9)], as.character) 
+fires$alert_date <- substring(fires$alert_date, first=1, 10)
+
+library(readr)
+
+write.csv(meteo, "D:/Filipa/Documents/Filipa/Universidade/CompSci/Data Mining I/Assignment/meteo.csv", row.names = FALSE) 
+
+```
+
+```{r}
+meteo <- read_csv("meteo.csv")
+
+fires <- mutate(fires, temp = NA)
+fires <- mutate(fires, tempMax = NA)
+fires <- mutate(fires, windVelocity = NA)
+fires <- mutate(fires, windGust = NA)
+
+for (j in 1:7404) {
+  i <- as.numeric(meteo[j, 1])
+  fires[i, 26] <- meteo[j, 4] # temp
+  fires[i, 27] <- meteo[j, 5] # tempMax
+  fires[i, 28] <- meteo[j, 9] # windVelocity
+  fires[i, 29] <- meteo[j, 8] # windGust
+}
+
+
+write.csv(fires, "D:/Filipa/Documents/Filipa/Universidade/CompSci/Data Mining I/Assignment/newFires.csv", row.names = FALSE)
+
+```
+
+
+## Handling More Missing Values and Removing More Variables
+
+```{r}
+newFires <- read_csv("newFires.csv")
+
+#################################################################################################################################
+# 'temp'
+# Preencher missing values pelas medias da temperatura media em cada regiao
+
+mediaTempBeiraLitoral <- mean(newFires$temp[newFires$region=='Beira Litoral'], na.rm=TRUE)
+mediaTempBeiraInterior <- mean(newFires$temp[newFires$region=='Beira Interior'], na.rm=TRUE)
+mediaTempRibatejoOeste <- mean(newFires$temp[newFires$region=='Ribatejo e Oeste'], na.rm=TRUE)
+mediaTempTrasOsMontes <- mean(newFires$temp[newFires$region=='Trás-os-Montes'], na.rm=TRUE)
+mediaTempAlgarve <- mean(newFires$temp[newFires$region=='Algarve'], na.rm=TRUE)
+mediaTempEntreDouroMinho <- mean(newFires$temp[newFires$region=='Entre Douro e Minho'], na.rm=TRUE)
+mediaTempAlentejo <- mean(newFires$temp[newFires$region=='Alentejo'], na.rm=TRUE)
+mediaTempNorte <- mean(newFires$temp[newFires$region=='Norte'], na.rm=TRUE)
+mediaTempLisboaTejo <- mean(newFires$temp[newFires$region=='Lisboa e Vale do Tejo'], na.rm=TRUE)
+mediaTempCentro <- mean(newFires$temp[newFires$region=='Centro'], na.rm=TRUE)
+
+for(i in 1:10309) { 
+  if(newFires[i, 2] == 'Beira Litoral' & is.na(newFires[i, 26])){
+    newFires[i, 26] <- mediaTempBeiraLitoral 
+  }
+  if(newFires[i, 2] == 'Beira Interior' & is.na(newFires[i, 26])){
+    newFires[i, 26] <- mediaTempBeiraInterior 
+  }
+  if(newFires[i, 2] == 'Ribatejo e Oeste' & is.na(newFires[i, 26])){
+    newFires[i, 26] <- mediaTempRibatejoOeste 
+  }
+  if(newFires[i, 2] == 'Trás-os-Montes' & is.na(newFires[i, 26])){
+    newFires[i, 26] <- mediaTempTrasOsMontes 
+  }
+  if(newFires[i, 2] == 'Algarve' & is.na(newFires[i, 26])){
+    newFires[i, 26] <- mediaTempAlgarve 
+  }
+  if(newFires[i, 2] == 'Entre Douro e Minho' & is.na(newFires[i, 26])){
+    newFires[i, 26] <- mediaTempEntreDouroMinho
+  }
+  if(newFires[i, 2] == 'Alentejo' & is.na(newFires[i, 26])){
+    newFires[i, 26] <- mediaTempAlentejo
+  }
+  if(newFires[i, 2] == 'Norte' & is.na(newFires[i, 26])){
+    newFires[i, 26] <- mediaTempNorte
+  }
+  if(newFires[i, 2] == 'Lisboa e Vale do Tejo' & is.na(newFires[i, 26])){
+    newFires[i, 26] <- mediaTempLisboaTejo
+  }
+  if(newFires[i, 2] == 'Centro' & is.na(newFires[i, 26])){
+    newFires[i, 26] <- mediaTempCentro
+  }
+}
+
+#################################################################################################################################
+# 'windVelocity'
+# Preencher missing values pelas medias da windVelocity em cada regiao
+mediaWindBeiraLitoral <- mean(newFires$windVelocity[newFires$region=='Beira Litoral'], na.rm=TRUE)
+mediaWindBeiraInterior <- mean(newFires$windVelocity[newFires$region=='Beira Interior'], na.rm=TRUE)
+mediaWindRibatejoOeste <- mean(newFires$windVelocity[newFires$region=='Ribatejo e Oeste'], na.rm=TRUE)
+mediaWindTrasOsMontes <- mean(newFires$windVelocity[newFires$region=='Trás-os-Montes'], na.rm=TRUE)
+mediaWindAlgarve <- mean(newFires$windVelocity[newFires$region=='Algarve'], na.rm=TRUE)
+mediaWindEntreDouroMinho <- mean(newFires$windVelocity[newFires$region=='Entre Douro e Minho'], na.rm=TRUE)
+mediaWindAlentejo <- mean(newFires$windVelocity[newFires$region=='Alentejo'], na.rm=TRUE)
+mediaWindNorte <- mean(newFires$windVelocity[newFires$region=='Norte'], na.rm=TRUE)
+mediaWindLisboaTejo <- mean(newFires$windVelocity[newFires$region=='Lisboa e Vale do Tejo'], na.rm=TRUE)
+mediaWindCentro <- mean(newFires$windVelocity[newFires$region=='Centro'], na.rm=TRUE)
+
+for(i in 1:10309) { 
+  if(newFires[i, 2] == 'Beira Litoral' & is.na(newFires[i, 28])){
+    newFires[i, 28] <- mediaWindBeiraLitoral 
+  }
+  if(newFires[i, 2] == 'Beira Interior' & is.na(newFires[i, 28])){
+    newFires[i, 28] <- mediaWindBeiraInterior 
+  }
+  if(newFires[i, 2] == 'Ribatejo e Oeste' & is.na(newFires[i, 28])){
+    newFires[i, 28] <- mediaWindRibatejoOeste 
+  }
+  if(newFires[i, 2] == 'Trás-os-Montes' & is.na(newFires[i, 28])){
+    newFires[i, 28] <- mediaWindTrasOsMontes 
+  }
+  if(newFires[i, 2] == 'Algarve' & is.na(newFires[i, 28])){
+    newFires[i, 28] <- mediaWindAlgarve 
+  }
+  if(newFires[i, 2] == 'Entre Douro e Minho' & is.na(newFires[i, 28])){
+    newFires[i, 28] <- mediaWindEntreDouroMinho
+  }
+  if(newFires[i, 2] == 'Alentejo' & is.na(newFires[i, 28])){
+    newFires[i, 28] <- mediaWindAlentejo
+  }
+  if(newFires[i, 2] == 'Norte' & is.na(newFires[i, 28])){
+    newFires[i, 28] <- mediaWindNorte
+  }
+  if(newFires[i, 2] == 'Lisboa e Vale do Tejo' & is.na(newFires[i, 28])){
+    newFires[i, 28] <- mediaWindLisboaTejo
+  }
+  if(newFires[i, 2] == 'Centro' & is.na(newFires[i, 28])){
+    newFires[i, 28] <- mediaWindCentro
+  }
+}
+
+#################################################################################################################################
+# 'tempMax'
+# Preencher missing values pelas medias da tempMax em cada regiao
+mediaTempMaxBeiraLitoral <- mean(newFires$tempMax[newFires$region=='Beira Litoral'], na.rm=TRUE)
+mediaTempMaxBeiraInterior <- mean(newFires$tempMax[newFires$region=='Beira Interior'], na.rm=TRUE)
+mediaTempMaxRibatejoOeste <- mean(newFires$tempMax[newFires$region=='Ribatejo e Oeste'], na.rm=TRUE)
+mediaTempMaxTrasOsMontes <- mean(newFires$tempMax[newFires$region=='Trás-os-Montes'], na.rm=TRUE)
+mediaTempMaxAlgarve <- mean(newFires$tempMax[newFires$region=='Algarve'], na.rm=TRUE)
+mediaTempMaxEntreDouroMinho <- mean(newFires$tempMax[newFires$region=='Entre Douro e Minho'], na.rm=TRUE)
+mediaTempMaxAlentejo <- mean(newFires$tempMax[newFires$region=='Alentejo'], na.rm=TRUE)
+mediaTempMaxNorte <- mean(newFires$tempMax[newFires$region=='Norte'], na.rm=TRUE)
+mediaTempMaxLisboaTejo <- mean(newFires$tempMax[newFires$region=='Lisboa e Vale do Tejo'], na.rm=TRUE)
+mediaTempMaxCentro <- mean(newFires$tempMax[newFires$region=='Centro'], na.rm=TRUE)
+
+for(i in 1:10309) { 
+  if(newFires[i, 2] == 'Beira Litoral' & is.na(newFires[i, 27])){
+    newFires[i, 27] <- mediaTempMaxBeiraLitoral 
+  }
+  if(newFires[i, 2] == 'Beira Interior' & is.na(newFires[i, 27])){
+    newFires[i, 27] <- mediaTempMaxBeiraInterior 
+  }
+  if(newFires[i, 2] == 'Ribatejo e Oeste' & is.na(newFires[i, 27])){
+    newFires[i, 27] <- mediaTempMaxRibatejoOeste 
+  }
+  if(newFires[i, 2] == 'Trás-os-Montes' & is.na(newFires[i, 27])){
+    newFires[i, 27] <- mediaTempMaxTrasOsMontes 
+  }
+  if(newFires[i, 2] == 'Algarve' & is.na(newFires[i, 27])){
+    newFires[i, 27] <- mediaTempMaxAlgarve 
+  }
+  if(newFires[i, 2] == 'Entre Douro e Minho' & is.na(newFires[i, 27])){
+    newFires[i, 27] <- mediaTempMaxEntreDouroMinho
+  }
+  if(newFires[i, 2] == 'Alentejo' & is.na(newFires[i, 27])){
+    newFires[i, 27] <- mediaTempMaxAlentejo
+  }
+  if(newFires[i, 2] == 'Norte' & is.na(newFires[i, 27])){
+    newFires[i, 27] <- mediaTempMaxNorte
+  }
+  if(newFires[i, 2] == 'Lisboa e Vale do Tejo' & is.na(newFires[i, 27])){
+    newFires[i, 27] <- mediaTempMaxLisboaTejo
+  }
+  if(newFires[i, 2] == 'Centro' & is.na(newFires[i, 27])){
+    newFires[i, 27] <- mediaTempMaxCentro
+  }
+}
+
+#################################################################################################################################
+# 'windGust'
+# Preencher missing values pelas medias da windGust em cada regiao
+mediaWindGustBeiraLitoral <- mean(newFires$windGust[newFires$region=='Beira Litoral'], na.rm=TRUE)
+mediaWindGustBeiraInterior <- mean(newFires$windGust[newFires$region=='Beira Interior'], na.rm=TRUE)
+mediaWindGustRibatejoOeste <- mean(newFires$windGust[newFires$region=='Ribatejo e Oeste'], na.rm=TRUE)
+mediaWindGustTrasOsMontes <- mean(newFires$windGust[newFires$region=='Trás-os-Montes'], na.rm=TRUE)
+mediaWindGustAlgarve <- mean(newFires$windGust[newFires$region=='Algarve'], na.rm=TRUE)
+mediaWindGustEntreDouroMinho <- mean(newFires$windGust[newFires$region=='Entre Douro e Minho'], na.rm=TRUE)
+mediaWindGustAlentejo <- mean(newFires$windGust[newFires$region=='Alentejo'], na.rm=TRUE)
+mediaWindGustNorte <- mean(newFires$windGust[newFires$region=='Norte'], na.rm=TRUE)
+mediaWindGustLisboaTejo <- mean(newFires$windGust[newFires$region=='Lisboa e Vale do Tejo'], na.rm=TRUE)
+mediaWindGustCentro <- mean(newFires$windGust[newFires$region=='Centro'], na.rm=TRUE)
+
+for(i in 1:10309) { 
+  if(newFires[i, 2] == 'Beira Litoral' & is.na(newFires[i, 29])){
+    newFires[i, 29] <- mediaWindGustBeiraLitoral 
+  }
+  if(newFires[i, 2] == 'Beira Interior' & is.na(newFires[i, 29])){
+    newFires[i, 29] <- mediaWindGustBeiraInterior 
+  }
+  if(newFires[i, 2] == 'Ribatejo e Oeste' & is.na(newFires[i, 29])){
+    newFires[i, 29] <- mediaWindGustRibatejoOeste 
+  }
+  if(newFires[i, 2] == 'Trás-os-Montes' & is.na(newFires[i, 29])){
+    newFires[i, 29] <- mediaWindGustTrasOsMontes 
+  }
+  if(newFires[i, 2] == 'Algarve' & is.na(newFires[i, 29])){
+    newFires[i, 29] <- mediaWindGustAlgarve 
+  }
+  if(newFires[i, 2] == 'Entre Douro e Minho' & is.na(newFires[i, 29])){
+    newFires[i, 29] <- mediaWindGustEntreDouroMinho
+  }
+  if(newFires[i, 2] == 'Alentejo' & is.na(newFires[i, 29])){
+    newFires[i, 29] <- mediaWindGustAlentejo
+  }
+  if(newFires[i, 2] == 'Norte' & is.na(newFires[i, 29])){
+    newFires[i, 29] <- mediaWindGustNorte
+  }
+  if(newFires[i, 2] == 'Lisboa e Vale do Tejo' & is.na(newFires[i, 29])){
+    newFires[i, 29] <- mediaWindGustLisboaTejo
+  }
+  if(newFires[i, 2] == 'Centro' & is.na(newFires[i, 29])){
+    newFires[i, 29] <- mediaWindGustCentro
+  }
+}
+
+#################################################################################################################################
+# Retirar a variável 'horasLat' --> Não é necessário
+newFires <- select(newFires, -(horasLat))
+
+# Retirar a variável 'minLat' --> Não é necessário
+newFires <- select(newFires, -(minLat))
+
+# Retirar a variável 'segLat' --> Não é necessário
+newFires <- select(newFires, -(segLat))
+
+# Retirar a variável 'horasLon' --> Não é necessário
+newFires <- select(newFires, -(horasLon))
+
+# Retirar a variável 'minLon' --> Não é necessário
+newFires <- select(newFires, -(minLon))
+
+# Retirar a variável 'segLon' --> Não é necessário
+newFires <- select(newFires, -(segLon))
+
+# Retirar a variável 'diff_in_days' --> Não é necessário
+newFires <- select(newFires, -(diff_in_days))
+
+fires$alert_date <- paste(fires$alert_date,fires$alert_hour,sep=" ")
+fires$alert_date <- as.POSIXct(fires$alert_date)
+
+write.csv(newFires, "D:/Filipa/Documents/Filipa/Universidade/CompSci/Data Mining I/Assignment/newFires2.csv", row.names = FALSE)
+newFires2 <- read_csv("newFires2.csv")
+```
+
+# Predictive Modelling
+
+```{r}
+# Libraries
+library(readr)
+library(tidymodels)
+library(tidyverse)
+
+# Set Directory
+setwd("/Users/matiasluna/Library/CloudStorage/OneDrive-UniversidadedoPorto/1 ano/1 semestre/CC4018 Data Mining I/Projeto/entrega")
+
+# Read file
+fires <- read_csv('newFires2.csv')
+
+fires %>% 
+  count(intentional_cause) %>% 
+  mutate(prop = n/sum(n))
+
+# Split data into training(0.7) and testing(0.3)
+
+fires_split <- fires %>% initial_split(prop=.7,strata=intentional_cause)
+fires_train <- training(fires_split)
+fires_test  <- testing(fires_split)
+
+set.seed(123)
+fires_folds <- vfold_cv(fires_train,v=10 ,repeats=1)
+
+```
+
+```{r}
+
+#Creating Recipes
+
+fires_rec <- recipe(intentional_cause ~ ., data=fires_train)  %>% 
+  step_rm(id) %>% 
+  step_rm(municipality) %>% 
+  step_rm(parish) %>% 
+  step_rm(lat) %>%
+  step_rm(lon) %>% 
+  step_rm(alert_hour) %>% 
+  step_date(alert_date) %>% 
+  step_date(extinction_date) %>% 
+  step_date(firstInterv_date) %>% 
+  step_naomit(everything(), skip = TRUE) %>% 
+  step_novel(all_nominal(), -all_outcomes()) %>%
+  step_normalize(all_numeric(), -all_outcomes()) %>% 
+  step_dummy(all_nominal(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes()) %>%
+  step_zv(all_numeric(), -all_outcomes()) %>%
+  step_corr(all_numeric_predictors(), threshold = 0.7, method = "spearman") %>%
+  step_bin2factor(all_outcomes()) %>%
+  prep()
+
+summary(fires_rec)
+
+fires_nodates_rec <- recipe(intentional_cause ~ ., data=fires_train)  %>% 
+  step_rm(id) %>% 
+  step_rm(municipality) %>% 
+  step_rm(parish) %>% 
+  step_rm(lat) %>%
+  step_rm(lon) %>% 
+  step_rm(alert_hour) %>% 
+  step_rm(alert_date) %>% 
+  step_rm(extinction_date) %>% 
+  step_rm(firstInterv_date) %>% 
+  step_naomit(everything(), skip = TRUE) %>% 
+  step_novel(all_nominal(), -all_outcomes()) %>%
+  step_normalize(all_numeric(), -all_outcomes()) %>% 
+  step_dummy(all_nominal(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes()) %>%
+  step_zv(all_numeric(), -all_outcomes()) %>%
+  step_corr(all_numeric_predictors(), threshold = 0.7, method = "spearman") %>%
+  step_bin2factor(all_outcomes()) %>%
+  prep()
+
+```
+
+## Logistic Regression
+
+```{r}
+# Workflow
+
+lr_model <- logistic_reg(mode="classification",engine="glmnet", penalty = tune(), mixture=1)
+
+lr_reg_grid <- tibble(penalty = 10^seq(-4, -1, length.out = 30))
+lr_reg_grid %>% top_n(-5) # lowest penalty values
+lr_reg_grid %>% top_n(5)  # highest penalty values
+
+
+lr_wf <- workflow() %>%
+  add_model(lr_model) %>%
+  add_recipe(fires_nodates_rec)
+
+lr_res <- 
+  lr_wf %>% 
+  tune_grid(
+    resamples = fires_folds, 
+    grid = lr_reg_grid,
+    metrics = metric_set(roc_auc),
+    control = control_grid(save_pred = TRUE)
+    )
+lr_res %>%  collect_metrics(summarize = TRUE)
+```
+```{r}
+
+lr_pred <- 
+  lr_res %>%
+  collect_predictions()
+
+lr_pred %>% 
+  group_by(penalty) %>% # id contains our folds
+  roc_curve(intentional_cause, .pred_yes) %>% 
+  autoplot()
+
+```
+## CART
+
+```{r}
+cart_model <- decision_tree(mode="classification",engine="rpart", tree_depth = tune(), min_n = tune())
+cart_wf <- workflow() %>%
+  add_model(cart_model) %>%
+  add_recipe(fires_rec)
+cart_grid <- grid_regular(tree_depth(), min_n(), levels = c(tree_depth = 5, min_n = 2))
+cart_res <- 
+  cart_wf %>% 
+  tune_grid(
+    resamples = fires_folds, 
+    metrics = metric_set(roc_auc),
+    grid = cart_grid,
+    control = control_resamples(save_pred = TRUE)
+    ) 
+collect_metrics(cart_res)
+
+```
+
+```{r}
+cart_pred <- 
+  cart_res %>%
+  collect_predictions()
+
+cart_pred %>% 
+  group_by(tree_depth) %>% # id contains our folds
+  roc_curve(intentional_cause, .pred_yes) %>% 
+  autoplot()
+```
+## kNN
+
+```{r}
+knn_model <- nearest_neighbor(mode="classification",engine="kknn",
+                              neighbors = tune(),
+                              dist_power = tune()
+                              )
+
+knn_grid <- grid_regular(neighbors(), dist_power(), levels = c(neighbors = 10, dist_power = 2))
+
+knn_wf <- workflow() %>%
+  add_model(knn_model) %>%
+  add_recipe(fires_rec)
+knn_res <- 
+  knn_wf %>% 
+  tune_grid(
+    resamples = fires_folds, 
+    grid = knn_grid,
+    metrics = metric_set(roc_auc),
+    control = control_resamples(save_pred = TRUE)
+    ) 
+collect_metrics(knn_res)
+
+```
+
+```{r}
+knn_pred <- 
+  knn_res %>%
+  collect_predictions()
+
+knn_pred %>% 
+  group_by(neighbors) %>% # id contains our folds
+  roc_curve(intentional_cause, .pred_yes) %>% 
+  autoplot()
+```
+
+## Neural Network
+
+```{r}
+# Workflow
+
+nn_model <- mlp(mode="classification",engine="nnet", 
+  hidden_units = tune(),
+  penalty = tune(),
+  epochs = 10)
+
+nn_grid <- grid_regular(hidden_units(), penalty(), levels = c(hidden_units = 5, penalty = 5))
+
+nn_wf <- workflow() %>%
+  add_model(nn_model) %>%
+  add_recipe(fires_nodates_rec)
+nn_res <- 
+  nn_wf %>% 
+  tune_grid(
+    resamples = fires_folds, 
+    metrics = metric_set(roc_auc),
+    grid = nn_grid,
+    control = control_resamples(save_pred = TRUE)
+    )
+nn_res %>%  collect_metrics(summarize = TRUE)
+```
+
+```{r}
+
+nn_pred <- 
+  nn_res %>%
+  collect_predictions()
+
+nn_pred %>% 
+  group_by(id) %>% # id contains our folds
+  roc_curve(intentional_cause, .pred_yes) %>% 
+  autoplot()
+
+```
+
+## Naive Bayes
+
+```{r}
+# Workflow
+library(discrim)
+library(klaR)
+
+nb_model <- naive_Bayes(mode="classification",engine="klaR", 
+  smoothness = tune(),
+  Laplace = tune()
+  )
+
+nb_grid <- grid_regular(smoothness(), Laplace(), levels = c(smoothness = 5, Laplace = 5))
+
+nb_wf <- workflow() %>%
+  add_model(nb_model) %>%
+  add_recipe(fires_nodates_rec)
+
+nb_res <- 
+  nb_wf %>% 
+  tune_grid(
+    resamples = fires_folds, 
+    metrics = metric_set(roc_auc),
+    grid = nb_grid,
+    control = control_resamples(save_pred = TRUE)
+    )
+nb_res %>%  collect_metrics(summarize = TRUE)
+```
+
+```{r}
+
+nb_pred <- 
+  nb_res %>%
+  collect_predictions()
+
+nb_pred %>% 
+  group_by(id) %>% # id contains our folds
+  roc_curve(intentional_cause, .pred_yes) %>% 
+  autoplot()
+
+```
+
+## Random Forest
+
+```{r}
+# Workflow
+
+cores <- parallel::detectCores()
+
+rf_model <- 
+  rand_forest(mtry = tune(), min_n = tune(), trees = 100) %>% 
+  set_engine("ranger", num.threads = cores) %>% 
+  set_mode("classification")
+
+#rf_grid <- grid_regular(mtry(), min_n(), levels = c(mtry = 5, min_n = 5))
+
+rf_wf <- workflow() %>%
+  add_model(rf_model) %>%
+  add_recipe(fires_rec)
+
+rf_res <- 
+  rf_wf %>% 
+  tune_grid(
+    resamples = fires_folds, 
+    metrics = metric_set(roc_auc),
+    grid = 25,
+    control = control_resamples(save_pred = TRUE)
+    )
+rf_res %>%  collect_metrics(summarize = TRUE)
+```
+
+```{r}
+
+rf_pred <- 
+  rf_res %>%
+  collect_predictions()
+
+rf_pred %>% 
+  group_by(id) %>% # id contains our folds
+  roc_curve(intentional_cause, .pred_yes) %>% 
+  autoplot()
+
+```
+
+## Boosted Trees
+
+```{r}
+# Workflow
+
+cores <- parallel::detectCores()
+
+bt_model <- 
+  boost_tree(mtry = tune(), min_n = tune(), trees = 100) %>% 
+  set_engine("xgboost", num.threads = cores) %>% 
+  set_mode("classification")
+
+#bt_grid <- grid_regular(tree_depth(), min_n(), levels = c(tree_depth = 5, min_n = 5))
+
+bt_wf <- workflow() %>%
+  add_model(bt_model) %>%
+  add_recipe(fires_nodates_rec)
+
+bt_res <- 
+  bt_wf %>% 
+  tune_grid(
+    resamples = fires_folds, 
+    metrics = metric_set(roc_auc),
+    grid = 25,
+    control = control_resamples(save_pred = TRUE)
+    )
+bt_res %>%  collect_metrics(summarize = TRUE)
+```
+
+```{r}
+
+bt_pred <- 
+  bt_res %>%
+  collect_predictions()
+
+bt_pred %>% 
+  group_by(id) %>% # id contains our folds
+  roc_curve(intentional_cause, .pred_yes) %>% 
+  autoplot()
+
+```
+
+
+## SVM
+
+```{r}
+
+# Workflow
+
+cores <- parallel::detectCores()
+
+svm_model <- 
+  svm_poly(cost = tune(), degree = tune()) %>% 
+  set_engine("kernlab", num.threads = cores) %>% 
+  set_mode("classification")
+
+#svm_grid <- grid_regular(cost(), levels = c(cost = 15))
+
+svm_wf <- workflow() %>%
+  add_model(svm_model) %>%
+  add_recipe(fires_rec)
+
+svm_res <- 
+  svm_wf %>% 
+  tune_grid(
+    resamples = fires_folds, 
+    metrics = metric_set(roc_auc),
+    grid = 16,
+    control = control_resamples(save_pred = TRUE)
+    )
+svm_res %>%  collect_metrics(summarize = TRUE)
+```
+
+```{r}
+
+svm_pred <- 
+  svm_res %>%
+  collect_predictions()
+
+svm_pred %>% 
+  group_by(id) %>% # id contains our folds
+  roc_curve(intentional_cause, .pred_yes) %>% 
+  autoplot()
+
+```
+
+## Comparisson of all models
+
+```{r}
+lr_best <- 
+  lr_res %>% 
+  select_best(metric = "roc_auc")
+cart_best <- 
+  cart_res %>% 
+  select_best(metric = "roc_auc")
+knn_best <- 
+  knn_res %>% 
+  select_best(metric = "roc_auc")
+nn_best <- 
+  nn_res %>% 
+  select_best(metric = "roc_auc")
+nb_best <- 
+  nb_res %>% 
+  select_best(metric = "roc_auc")
+rf_best <- 
+  rf_res %>% 
+  select_best(metric = "roc_auc")
+bt_best <- 
+  bt_res %>% 
+  select_best(metric = "roc_auc")
+#svm_best <- 
+#  svm_res %>% 
+#  select_best(metric = "roc_auc")
+```
+
+```{r}
+lr_auc <- 
+  lr_res %>% 
+  collect_predictions(parameters = lr_best) %>% 
+  roc_curve(intentional_cause, .pred_yes) %>% 
+  mutate(model = "Logistic Regression")
+cart_auc <- 
+  cart_res %>% 
+  collect_predictions(parameters = cart_best) %>% 
+  roc_curve(intentional_cause, .pred_yes) %>% 
+  mutate(model = "Decision Tree")
+knn_auc <- 
+  knn_res %>% 
+  collect_predictions(parameters = knn_best) %>% 
+  roc_curve(intentional_cause, .pred_yes) %>% 
+  mutate(model = "k-Nearest Neighbor")
+nn_auc <- 
+  nn_res %>% 
+  collect_predictions(parameters = nn_best) %>% 
+  roc_curve(intentional_cause, .pred_yes) %>% 
+  mutate(model = "Neural Network")
+nb_auc <- 
+  nb_res %>% 
+  collect_predictions(parameters = nb_best) %>% 
+  roc_curve(intentional_cause, .pred_yes) %>% 
+  mutate(model = "Naive Bayes")
+rf_auc <- 
+  rf_res %>% 
+  collect_predictions(parameters = rf_best) %>% 
+  roc_curve(intentional_cause, .pred_yes) %>% 
+  mutate(model = "Random Forest")
+bt_auc <- 
+  bt_res %>% 
+  collect_predictions(parameters = bt_best) %>% 
+  roc_curve(intentional_cause, .pred_yes) %>% 
+  mutate(model = "Boosted Trees")
+#svm_auc <- 
+#  svm_res %>% 
+#  collect_predictions(parameters = svm_best) %>% 
+#  roc_curve(intentional_cause, .pred_yes) %>% 
+#  mutate(model = "Suport Vector Machine")
+
+```
+
+```{r}
+bind_rows(lr_auc, cart_auc, knn_auc, nn_auc, nb_auc, rf_auc, bt_auc) %>% 
+  ggplot(aes(x = 1 - specificity, y = sensitivity, col = model)) + 
+  geom_path(linewidth = 1.5, alpha = 0.8) +
+  geom_abline(lty = 3) + 
+  coord_equal() + 
+  scale_color_viridis_d(option = "plasma", end = .6)
+```
+
+## Last Fit
+
+```{r}
+rf_best
+```
+
+```{r}
+cores <- parallel::detectCores()
+
+rf_model <- 
+  rand_forest(mtry = tune(), min_n = tune(), trees = 100) %>% 
+  set_engine("ranger", num.threads = cores) %>% 
+  set_mode("classification")
+
+#rf_grid <- grid_regular(mtry(), min_n(), levels = c(mtry = 5, min_n = 5))
+
+rf_wf <- workflow() %>%
+  add_model(rf_model) %>%
+  add_recipe(fires_rec)
+```
+
+
+```{r}
+# the last model
+last_rf_model <- 
+  rand_forest(mtry = 4, min_n = 20, trees = 100) %>% 
+  set_engine("ranger", num.threads = cores, importance = "impurity") %>% 
+  set_mode("classification")
+
+# the last workflow
+last_rf_wf <- 
+  rf_wf %>% 
+  update_model(last_rf_model)
+
+# the last fit
+set.seed(345)
+last_rf_fit <- 
+  last_rf_wf %>% 
+  last_fit(fires_split)
+
+last_rf_fit
+
+last_rf_fit %>% 
+  collect_metrics()
+```
+
+```{r}
+library(vip)
+
+last_rf_fit %>% 
+  extract_fit_parsnip() %>% 
+  vip(num_features = 20)
+
+```
+# Preparing the submision file
+
+```{r}
+# Libraries
+library(readr)
+library(tidymodels)
+library(tidyverse)
+
+# Set Directory
+setwd("D:/Filipa/Documents/Filipa/Universidade/CompSci/Data Mining I/Assignment/")
+
+# Read file
+fires <- read_csv('fires_test.csv')
+#str(fires)
+#summary(fires)
+#View(fires)
+
+# View important information about possible and missing values
+for (col in colnames(fires)) {
+  print(col)
+  #print(unique(fires[,col]))
+  #print(which(is.na(fires[,col])))
+  print(sum(is.na(fires[,col])))
+}
+
+# Remove 'alert_source' --> (NA's:10309)
+fires <- select(fires, -(alert_source))
+
+# Remove 'extinction_hour' --> Not necessary
+fires <- select(fires, -(extinction_hour))
+
+# Remove 'firstInterv_hour' --> Not necessary
+fires <- select(fires, -(firstInterv_hour))
+
+# Two Possible Values for district Viana do Castelo
+fires$district[(fires$district=='Viana Do Castelo')] <- 'Viana do Castelo'
+
+# Fill Missing Region values
+fires$region[(fires$region=='-' & fires$district=='Aveiro')] <- 'Beira Litoral'
+fires$region[(fires$region=='-' & fires$district=='Coimbra')] <- 'Beira Litoral'
+fires$region[(fires$region=='-' & fires$district=='Leiria')] <- 'Beira Litoral'
+fires$region[(fires$region=='-' & fires$district=='Viseu')] <- 'Beira Litoral'
+fires$region[(fires$region=='-' & fires$district=='Castelo Branco')] <- 'Beira Interior'
+fires$region[(fires$region=='-' & fires$district=='Guarda')] <- 'Beira Interior'
+fires$region[(fires$region=='-' & fires$district=='Santarém')] <- 'Ribatejo e Oeste'
+fires$region[(fires$region=='-' & fires$district=='Faro')] <- 'Algarve'
+fires$region[(fires$region=='-' & fires$district=='Bragança')] <- 'Trás-os-Montes'
+fires$region[(fires$region=='-' & fires$district=='Vila Real')] <- 'Trás-os-Montes'
+fires$region[(fires$region=='-' & fires$district=='Viana do Castelo')] <- 'Entre Douro e Minho'
+fires$region[(fires$region=='-' & fires$district=='Braga')] <- 'Entre Douro e Minho'
+fires$region[(fires$region=='-' & fires$district=='Porto')] <- 'Entre Douro e Minho'
+fires$region[(fires$region=='-' & fires$district=='Beja')] <- 'Alentejo'
+fires$region[(fires$region=='-' & fires$district=='Évora')] <- 'Alentejo'
+fires$region[(fires$region=='-' & fires$district=='Portalegre')] <- 'Alentejo'
+fires$region[(fires$region=='-' & fires$district=='Lisboa')] <- 'Lisboa e Vale do Tejo'
+fires$region[(fires$region=='-' & fires$district=='Setúbal')] <- 'Lisboa e Vale do Tejo'
+
+fires$district[(is.na(fires$region))] #Setúbal
+fires$region[is.na(fires$region)] <- 'Lisboa e Vale do Tejo'
+
+#################################################################################################################################
+# Corrigir erros nas coordenadas
+# Substituir ',', por '.' em valores
+fires$lat <- chartr(',', '.', fires$lat)
+fires$lon <- chartr(',', '.', fires$lon)
+
+#################################################################################################################################
+# Valores de coordenadas todas na mesma forma
+fires$lat <- chartr('º', ':', fires$lat)
+fires$lat <- chartr("'", ':', fires$lat)
+fires$lat <- gsub('::', '', fires$lat)
+
+fires$lon <- chartr('º', ':', fires$lon)
+fires$lon <- chartr("'", ':', fires$lon)
+fires$lon <- gsub('::', '', fires$lon)
+
+#################################################################################################################################
+# Valores de coordenadas na forma DMS
+fires$lat <- sub(':','º',fires$lat)
+fires$lat <- sub(':',"'",fires$lat)
+#fires$lat <- paste0(fires$lat, "''")
+
+fires$lon <- sub(':','º',fires$lon)
+fires$lon <- sub(':',"'",fires$lon)
+#fires$lon <- paste0(fires$lon, "''")
+
+#################################################################################################################################
+# Valores de coordenadas de DMS para DD
+# Criar nova coluna com horas da latitude
+horasLat <- unlist(gregexpr("º", fires$lat)) 
+fires$horasLat <- substring(fires$lat, first=1, last=horasLat - 1)
+# Criar nova coluna com minutos da latitude
+minLat <- unlist(gregexpr("'", fires$lat)) # retornar posição com aquele caracter
+fires$minLat <- substring(fires$lat, first=horasLat + 1, last=minLat - 1)
+# Criar nova coluna com segundos da latitude
+segLat <- length(fires$lat)
+fires$segLat <- substring(fires$lat, first=minLat + 1, last=segLat)
+
+# mudar o tipo das colunas 18, 19 e 20 de character para integer
+fires[c(18, 19, 20)] <- lapply(fires[c(18, 19, 20)], as.integer) 
+typeof(fires$segLat)
+# alterar lat para DD
+for (i in 1:4416) {
+  if(!is.na(fires[i, 18]) & !is.na(fires[i, 19]) & !is.na(fires[i, 20])){
+    latValue <- fires[i, 18] + (fires$minLat[!is.na(fires[i, 19])]/60) + (fires[i, 20]/3600)
+    # Converter de double para string
+    fires[i, 6]<- toString(latValue)
+  }
+}
+
+# Criar nova coluna com horas da longitude
+horasLon <- unlist(gregexpr("º", fires$lon)) # retorna posição deste caracter
+fires$horasLon <- substring(fires$lon, first=1, last=horasLon - 1)
+# Criar nova coluna com minutos da latitude
+minLon <- unlist(gregexpr("'", fires$lon)) # retornar posição com aquele caracter
+fires$minLon <- substring(fires$lon, first=horasLon + 1, last=minLon - 1)
+# Criar nova coluna com segundos da latitude
+segLon <- length(fires$lon)
+fires$segLon <- substring(fires$lon, first=minLon + 1, last=segLon)
+
+# mudar o tipo das colunas 22, 23 e 24 de character para integer
+fires[c(21, 22, 23)] <- lapply(fires[c(21, 22, 23)], as.integer) 
+typeof(fires$segLon)
+# alterar lat para DD
+for (i in 1:4416) {
+  if(!is.na(fires[i, 21]) & !is.na(fires[i, 22]) & !is.na(fires[i, 23])){
+    lonValue <- (fires[i, 21] + (fires$minLat[!is.na(fires[i, 22])]/60) + (fires[i, 23]/3600))*(-1)
+    # Converter de double para string
+    fires[i, 7]<- toString(lonValue)
+  }
+  if(is.na(fires[i, 21]) | is.na(fires[i, 22]) | is.na(fires[i, 23])){
+    val <- fires[i, 7]
+    value <- as.double(val)
+    value <- value*(-1)
+    fires[i, 7] <- toString(value)
+  }
+}
+
+# Retirar hora de 'alert_date' e 'firstInterv_date'
+fires$alert_date <- substring(fires$alert_date, first=1, last=10)
+fires$firstInterv_date <- substring(fires$firstInterv_date, first=1, last=10)
+
+# Tratar missing values em 'firstInterv_date', passando-lhes os respetivos valores em 'alert_date'
+fires$firstInterv_date[(is.na(fires$firstInterv_date))] <- fires$alert_date[(is.na(fires$firstInterv_date))]
+
+# Preecher missing values em 'extinction_date'
+fires$alert_date = as.Date(fires$alert_date)
+fires$extinction_date = as.Date(fires$extinction_date)
+
+
+fires$diff_in_days = abs(as.numeric(difftime(fires$alert_date, fires$extinction_date, units = "days"))) 
+meanDifference <- mean(fires$diff_in_days, na.rm=TRUE)
+# Como meanDifference = 0.08..., a diferença será de 0 dias.
+
+# Atribuir a missing values de 'extinction_date' o valor de 'alert_date'+1
+fires$extinction_date[is.na(fires$extinction_date)] <- fires$alert_date[is.na(fires$extinction_date)]
+
+#Relative Values for Areas
+fires$village_area <- fires$village_area/fires$total_area
+fires$vegetation_area <- fires$vegetation_area/fires$total_area
+fires$farming_area <- fires$farming_area/fires$total_area
+fires$village_veget_area <- fires$village_veget_area/fires$total_area
+
+fires$village_area[(is.na(fires$village_area))] <- 0
+fires$vegetation_area[(is.na(fires$vegetation_area))] <- 0
+fires$farming_area[(is.na(fires$farming_area))] <- 0
+fires$village_veget_area[(is.na(fires$village_veget_area))] <- 0
+
+
+#install.packages("remotes")
+library(remotes)
+#install_github("bczernecki/climate")
+library(climate)
+
+fires[c(9)] <- lapply(fires[c(9)], as.character)
+
+columns= c("Id", "station_ID","Date","TemperatureCAvg","TemperatureCMax","TemperatureCMin", "WindkmhDir", "WindkmhGust", "WindkmhInt")
+# pass this vector length to ncol parameter
+# and nrow with 0
+meteo = data.frame(matrix(nrow = 0, ncol = length(columns)))
+
+# assign column names
+colnames(meteo) = columns
+
+# display
+print(meteo)
+
+# lon = -8.471944
+# lat = 42.01361
+# data ="2014-01-11"
+lon = fires[2, 7]
+lat = fires[2, 6]
+data = fires[2, 9]
+data <- toString(data)
+id = fires[2, 1]
+
+# get the nearest station
+nearest_station <-nearest_stations_ogimet(country = "Portugal",
+                                          date = Sys.Date(),
+                                          add_map = FALSE,
+                                          point = c(lon, lat),
+                                          no_of_stations = 1
+)
+
+# scrap meteorological data from Ogimet regarding a period and a specific station
+meteo_data <- meteo_ogimet(date=data,
+                           interval="daily",station=nearest_station$wmo_id)
+
+# add a row to students_df
+meteo = rbind(meteo, data.frame("Id"=id, "station_ID"=meteo_data$station_ID, "Date"=meteo_data$Date, "TemperatureCAvg"=meteo_data$TemperatureCAvg,
+                                "TemperatureCMax"=meteo_data$TemperatureCMax, "TemperatureCMin"=meteo_data$TemperatureCMin,
+                                "WindkmhDir"=meteo_data$WindkmhDir, "WindkmhGust"=meteo_data$WindkmhGust, "WindkmhInt"=meteo_data$WindkmhInt))
+
+for(i in 1:4416) {       
+  # Specifying expression
+  #print(fires[i, 7])
+  lon = fires[i, 7]
+  lat = fires[i, 6]
+  data = fires[i, 9]
+  data <- toString(data)
+  id = fires[i, 1]
+  # get the nearest station
+  tryCatch(               
+    # Specifying expression
+    expr = {                     
+      nearest_station <-nearest_stations_ogimet(country = "Portugal",
+                                                date = Sys.Date(),
+                                                add_map = FALSE,
+                                                point = c(lon, lat),
+                                                no_of_stations = 1
+      )
+      # scrap meteorological data from Ogimet regarding a period and a specific station
+      meteo_data <- meteo_ogimet(date=data,
+                                 interval="daily",station=nearest_station$wmo_id)
+      # add a row to students_df
+      meteo = rbind(meteo, data.frame("Id"=id, "station_ID"=meteo_data$station_ID, "Date"=meteo_data$Date, "TemperatureCAvg"=meteo_data$TemperatureCAvg,
+                                      "TemperatureCMax"=meteo_data$TemperatureCMax, "TemperatureCMin"=meteo_data$TemperatureCMin, 
+                                      "WindkmhDir"=meteo_data$WindkmhDir, "WindkmhGust"=meteo_data$WindkmhGust, "WindkmhInt"=meteo_data$WindkmhInt))
+      rm(nearest_station)
+      rm(meteo_data)
+      print("Everything was fine.")
+    },
+    error = function(e){         
+      print("There was an error message.")
+    }
+  )
+}
+
+################################################################################################################################
+# Criar variáveis "temp" -> temperatura e "windVelocity"
+# mudar o tipo da coluna 9 para character
+fires[c(9)] <- lapply(fires[c(9)], as.character) 
+fires$alert_date <- substring(fires$alert_date, first=1, 10)
+
+library(readr)
+
+write.csv(meteo, "D:/Filipa/Documents/Filipa/Universidade/CompSci/Data Mining I/Assignment/meteo_test.csv", row.names = FALSE)
+
+
+
+meteo <- read_csv("meteo_test.csv")
+
+fires <- mutate(fires, temp = NA)
+fires <- mutate(fires, tempMax = NA)
+fires <- mutate(fires, windVelocity = NA)
+fires <- mutate(fires, windGust = NA)
+
+for (j in 1:2985) {
+  i <- as.numeric(meteo[j, 1])
+  i <- i - 10309
+  fires[i, 25] <- meteo[j, 4] # temp
+  fires[i, 26] <- meteo[j, 5] # tempMax
+  fires[i, 27] <- meteo[j, 9] # windVelocity
+  fires[i, 28] <- meteo[j, 8] # windGust
+}
+
+
+write.csv(fires, "D:/Filipa/Documents/Filipa/Universidade/CompSci/Data Mining I/Assignment/newFires_test.csv", row.names = FALSE)
+
+newFires <- read_csv("newFires_test.csv")
+
+#################################################################################################################################
+# 'temp'
+# Preencher missing values pelas medias da temperatura media em cada regiao
+
+mediaTempBeiraLitoral <- mean(newFires$temp[newFires$region=='Beira Litoral'], na.rm=TRUE)
+mediaTempBeiraInterior <- mean(newFires$temp[newFires$region=='Beira Interior'], na.rm=TRUE)
+mediaTempRibatejoOeste <- mean(newFires$temp[newFires$region=='Ribatejo e Oeste'], na.rm=TRUE)
+mediaTempTrasOsMontes <- mean(newFires$temp[newFires$region=='Trás-os-Montes'], na.rm=TRUE)
+mediaTempAlgarve <- mean(newFires$temp[newFires$region=='Algarve'], na.rm=TRUE)
+mediaTempEntreDouroMinho <- mean(newFires$temp[newFires$region=='Entre Douro e Minho'], na.rm=TRUE)
+mediaTempAlentejo <- mean(newFires$temp[newFires$region=='Alentejo'], na.rm=TRUE)
+mediaTempNorte <- mean(newFires$temp[newFires$region=='Norte'], na.rm=TRUE)
+mediaTempLisboaTejo <- mean(newFires$temp[newFires$region=='Lisboa e Vale do Tejo'], na.rm=TRUE)
+mediaTempCentro <- mean(newFires$temp[newFires$region=='Centro'], na.rm=TRUE)
+
+for(i in 1:4416) { 
+  if(newFires[i, 2] == 'Beira Litoral' & is.na(newFires[i, 25])){
+    newFires[i, 25] <- mediaTempBeiraLitoral 
+  }
+  if(newFires[i, 2] == 'Beira Interior' & is.na(newFires[i, 25])){
+    newFires[i, 25] <- mediaTempBeiraInterior 
+  }
+  if(newFires[i, 2] == 'Ribatejo e Oeste' & is.na(newFires[i, 25])){
+    newFires[i, 25] <- mediaTempRibatejoOeste 
+  }
+  if(newFires[i, 2] == 'Trás-os-Montes' & is.na(newFires[i, 25])){
+    newFires[i, 25] <- mediaTempTrasOsMontes 
+  }
+  if(newFires[i, 2] == 'Algarve' & is.na(newFires[i, 25])){
+    newFires[i, 25] <- mediaTempAlgarve 
+  }
+  if(newFires[i, 2] == 'Entre Douro e Minho' & is.na(newFires[i, 25])){
+    newFires[i, 25] <- mediaTempEntreDouroMinho
+  }
+  if(newFires[i, 2] == 'Alentejo' & is.na(newFires[i, 25])){
+    newFires[i, 25] <- mediaTempAlentejo
+  }
+  if(newFires[i, 2] == 'Norte' & is.na(newFires[i, 25])){
+    newFires[i, 25] <- mediaTempNorte
+  }
+  if(newFires[i, 2] == 'Lisboa e Vale do Tejo' & is.na(newFires[i, 25])){
+    newFires[i, 25] <- mediaTempLisboaTejo
+  }
+  if(newFires[i, 2] == 'Centro' & is.na(newFires[i, 25])){
+    newFires[i, 25] <- mediaTempCentro
+  }
+}
+
+#################################################################################################################################
+# 'windVelocity'
+# Preencher missing values pelas medias da windVelocity em cada regiao
+mediaWindBeiraLitoral <- mean(newFires$windVelocity[newFires$region=='Beira Litoral'], na.rm=TRUE)
+mediaWindBeiraInterior <- mean(newFires$windVelocity[newFires$region=='Beira Interior'], na.rm=TRUE)
+mediaWindRibatejoOeste <- mean(newFires$windVelocity[newFires$region=='Ribatejo e Oeste'], na.rm=TRUE)
+mediaWindTrasOsMontes <- mean(newFires$windVelocity[newFires$region=='Trás-os-Montes'], na.rm=TRUE)
+mediaWindAlgarve <- mean(newFires$windVelocity[newFires$region=='Algarve'], na.rm=TRUE)
+mediaWindEntreDouroMinho <- mean(newFires$windVelocity[newFires$region=='Entre Douro e Minho'], na.rm=TRUE)
+mediaWindAlentejo <- mean(newFires$windVelocity[newFires$region=='Alentejo'], na.rm=TRUE)
+mediaWindNorte <- mean(newFires$windVelocity[newFires$region=='Norte'], na.rm=TRUE)
+mediaWindLisboaTejo <- mean(newFires$windVelocity[newFires$region=='Lisboa e Vale do Tejo'], na.rm=TRUE)
+mediaWindCentro <- mean(newFires$windVelocity[newFires$region=='Centro'], na.rm=TRUE)
+
+for(i in 1:4416) { 
+  if(newFires[i, 2] == 'Beira Litoral' & is.na(newFires[i, 27])){
+    newFires[i, 27] <- mediaWindBeiraLitoral 
+  }
+  if(newFires[i, 2] == 'Beira Interior' & is.na(newFires[i, 27])){
+    newFires[i, 27] <- mediaWindBeiraInterior 
+  }
+  if(newFires[i, 2] == 'Ribatejo e Oeste' & is.na(newFires[i, 27])){
+    newFires[i, 27] <- mediaWindRibatejoOeste 
+  }
+  if(newFires[i, 2] == 'Trás-os-Montes' & is.na(newFires[i, 27])){
+    newFires[i, 27] <- mediaWindTrasOsMontes 
+  }
+  if(newFires[i, 2] == 'Algarve' & is.na(newFires[i, 27])){
+    newFires[i, 27] <- mediaWindAlgarve 
+  }
+  if(newFires[i, 2] == 'Entre Douro e Minho' & is.na(newFires[i, 27])){
+    newFires[i, 27] <- mediaWindEntreDouroMinho
+  }
+  if(newFires[i, 2] == 'Alentejo' & is.na(newFires[i, 27])){
+    newFires[i, 27] <- mediaWindAlentejo
+  }
+  if(newFires[i, 2] == 'Norte' & is.na(newFires[i, 27])){
+    newFires[i, 27] <- mediaWindNorte
+  }
+  if(newFires[i, 2] == 'Lisboa e Vale do Tejo' & is.na(newFires[i, 27])){
+    newFires[i, 27] <- mediaWindLisboaTejo
+  }
+  if(newFires[i, 2] == 'Centro' & is.na(newFires[i, 27])){
+    newFires[i, 27] <- mediaWindCentro
+  }
+}
+
+#################################################################################################################################
+# 'tempMax'
+# Preencher missing values pelas medias da tempMax em cada regiao
+mediaTempMaxBeiraLitoral <- mean(newFires$tempMax[newFires$region=='Beira Litoral'], na.rm=TRUE)
+mediaTempMaxBeiraInterior <- mean(newFires$tempMax[newFires$region=='Beira Interior'], na.rm=TRUE)
+mediaTempMaxRibatejoOeste <- mean(newFires$tempMax[newFires$region=='Ribatejo e Oeste'], na.rm=TRUE)
+mediaTempMaxTrasOsMontes <- mean(newFires$tempMax[newFires$region=='Trás-os-Montes'], na.rm=TRUE)
+mediaTempMaxAlgarve <- mean(newFires$tempMax[newFires$region=='Algarve'], na.rm=TRUE)
+mediaTempMaxEntreDouroMinho <- mean(newFires$tempMax[newFires$region=='Entre Douro e Minho'], na.rm=TRUE)
+mediaTempMaxAlentejo <- mean(newFires$tempMax[newFires$region=='Alentejo'], na.rm=TRUE)
+mediaTempMaxNorte <- mean(newFires$tempMax[newFires$region=='Norte'], na.rm=TRUE)
+mediaTempMaxLisboaTejo <- mean(newFires$tempMax[newFires$region=='Lisboa e Vale do Tejo'], na.rm=TRUE)
+mediaTempMaxCentro <- mean(newFires$tempMax[newFires$region=='Centro'], na.rm=TRUE)
+
+for(i in 1:4416) { 
+  if(newFires[i, 2] == 'Beira Litoral' & is.na(newFires[i, 26])){
+    newFires[i, 26] <- mediaTempMaxBeiraLitoral 
+  }
+  if(newFires[i, 2] == 'Beira Interior' & is.na(newFires[i, 26])){
+    newFires[i, 26] <- mediaTempMaxBeiraInterior 
+  }
+  if(newFires[i, 2] == 'Ribatejo e Oeste' & is.na(newFires[i, 26])){
+    newFires[i, 26] <- mediaTempMaxRibatejoOeste 
+  }
+  if(newFires[i, 2] == 'Trás-os-Montes' & is.na(newFires[i, 26])){
+    newFires[i, 26] <- mediaTempMaxTrasOsMontes 
+  }
+  if(newFires[i, 2] == 'Algarve' & is.na(newFires[i, 26])){
+    newFires[i, 26] <- mediaTempMaxAlgarve 
+  }
+  if(newFires[i, 2] == 'Entre Douro e Minho' & is.na(newFires[i, 26])){
+    newFires[i, 26] <- mediaTempMaxEntreDouroMinho
+  }
+  if(newFires[i, 2] == 'Alentejo' & is.na(newFires[i, 26])){
+    newFires[i, 26] <- mediaTempMaxAlentejo
+  }
+  if(newFires[i, 2] == 'Norte' & is.na(newFires[i, 26])){
+    newFires[i, 26] <- mediaTempMaxNorte
+  }
+  if(newFires[i, 2] == 'Lisboa e Vale do Tejo' & is.na(newFires[i, 26])){
+    newFires[i, 26] <- mediaTempMaxLisboaTejo
+  }
+  if(newFires[i, 2] == 'Centro' & is.na(newFires[i, 26])){
+    newFires[i, 26] <- mediaTempMaxCentro
+  }
+}
+
+#################################################################################################################################
+# 'windGust'
+# Preencher missing values pelas medias da windGust em cada regiao
+mediaWindGustBeiraLitoral <- mean(newFires$windGust[newFires$region=='Beira Litoral'], na.rm=TRUE)
+mediaWindGustBeiraInterior <- mean(newFires$windGust[newFires$region=='Beira Interior'], na.rm=TRUE)
+mediaWindGustRibatejoOeste <- mean(newFires$windGust[newFires$region=='Ribatejo e Oeste'], na.rm=TRUE)
+mediaWindGustTrasOsMontes <- mean(newFires$windGust[newFires$region=='Trás-os-Montes'], na.rm=TRUE)
+mediaWindGustAlgarve <- mean(newFires$windGust[newFires$region=='Algarve'], na.rm=TRUE)
+mediaWindGustEntreDouroMinho <- mean(newFires$windGust[newFires$region=='Entre Douro e Minho'], na.rm=TRUE)
+mediaWindGustAlentejo <- mean(newFires$windGust[newFires$region=='Alentejo'], na.rm=TRUE)
+mediaWindGustNorte <- mean(newFires$windGust[newFires$region=='Norte'], na.rm=TRUE)
+mediaWindGustLisboaTejo <- mean(newFires$windGust[newFires$region=='Lisboa e Vale do Tejo'], na.rm=TRUE)
+mediaWindGustCentro <- mean(newFires$windGust[newFires$region=='Centro'], na.rm=TRUE)
+
+for(i in 1:4416) { 
+  if(newFires[i, 2] == 'Beira Litoral' & is.na(newFires[i, 28])){
+    newFires[i, 28] <- mediaWindGustBeiraLitoral 
+  }
+  if(newFires[i, 2] == 'Beira Interior' & is.na(newFires[i, 28])){
+    newFires[i, 28] <- mediaWindGustBeiraInterior 
+  }
+  if(newFires[i, 2] == 'Ribatejo e Oeste' & is.na(newFires[i, 28])){
+    newFires[i, 28] <- mediaWindGustRibatejoOeste 
+  }
+  if(newFires[i, 2] == 'Trás-os-Montes' & is.na(newFires[i, 28])){
+    newFires[i, 28] <- mediaWindGustTrasOsMontes 
+  }
+  if(newFires[i, 2] == 'Algarve' & is.na(newFires[i, 28])){
+    newFires[i, 28] <- mediaWindGustAlgarve 
+  }
+  if(newFires[i, 2] == 'Entre Douro e Minho' & is.na(newFires[i, 28])){
+    newFires[i, 28] <- mediaWindGustEntreDouroMinho
+  }
+  if(newFires[i, 2] == 'Alentejo' & is.na(newFires[i, 28])){
+    newFires[i, 28] <- mediaWindGustAlentejo
+  }
+  if(newFires[i, 2] == 'Norte' & is.na(newFires[i, 28])){
+    newFires[i, 28] <- mediaWindGustNorte
+  }
+  if(newFires[i, 2] == 'Lisboa e Vale do Tejo' & is.na(newFires[i, 28])){
+    newFires[i, 28] <- mediaWindGustLisboaTejo
+  }
+  if(newFires[i, 2] == 'Centro' & is.na(newFires[i, 28])){
+    newFires[i, 28] <- mediaWindGustCentro
+  }
+}
+
+#################################################################################################################################
+# Retirar a variável 'horasLat' --> Não é necessário
+newFires <- select(newFires, -(horasLat))
+
+# Retirar a variável 'minLat' --> Não é necessário
+newFires <- select(newFires, -(minLat))
+
+# Retirar a variável 'segLat' --> Não é necessário
+newFires <- select(newFires, -(segLat))
+
+# Retirar a variável 'horasLon' --> Não é necessário
+newFires <- select(newFires, -(horasLon))
+
+# Retirar a variável 'minLon' --> Não é necessário
+newFires <- select(newFires, -(minLon))
+
+# Retirar a variável 'segLon' --> Não é necessário
+newFires <- select(newFires, -(segLon))
+
+# Retirar a variável 'diff_in_days' --> Não é necessário
+newFires <- select(newFires, -(diff_in_days))
+
+fires$alert_date <- paste(fires$alert_date,fires$alert_hour,sep=" ")
+fires$alert_date <- as.POSIXct(fires$alert_date)
+
+write.csv(newFires, "D:/Filipa/Documents/Filipa/Universidade/CompSci/Data Mining I/Assignment/newFires2_test.csv", row.names = FALSE)
+```
+
+## Predictions
+
+```{r}
+# Libraries
+library(readr)
+library(tidymodels)
+library(tidyverse)
+
+# Set Directory
+setwd("D:/Filipa/Documents/Filipa/Universidade/CompSci/Data Mining I/Assignment/")
+
+# Read file
+fires <- read_csv('newFires2.csv')
+
+# Split data into training(0.7) and testing(0.3)
+set.seed(123)
+
+fires_split <- fires %>% initial_split(prop=.7,strata=intentional_cause)
+train <- training(fires_split)
+test  <- testing(fires_split)
+
+fires_rec <- recipe(intentional_cause ~., train)
+
+fires_rec <- fires_rec %>% 
+  step_rm(id) %>% 
+  step_rm(municipality) %>% 
+  step_rm(parish) %>% 
+  step_rm(lat) %>%
+  step_rm(lon) %>% 
+  step_rm(alert_hour) %>% 
+  step_date(alert_date) %>% 
+  step_date(extinction_date) %>% 
+  step_date(firstInterv_date) %>% 
+  step_naomit(everything(), skip = TRUE) %>% 
+  step_novel(all_nominal(), -all_outcomes()) %>%
+  step_normalize(all_numeric(), -all_outcomes()) %>% 
+  step_dummy(all_nominal(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes()) %>%
+  step_zv(all_numeric(), -all_outcomes()) %>%
+  step_corr(all_numeric_predictors(), threshold = 0.7, method = "spearman") %>%
+  prep()
+
+fires_final_test <- read_csv('newFires2_test.csv')
+
+fires_train <- fires_rec %>% step_bin2factor(all_outcomes()) %>% prep() %>% bake(new_data=NULL)
+fires_test <- fires_rec %>% bake(new_data=fires_final_test)
+
+```
+
+```{r}
+cores <- parallel::detectCores()
+
+model_rf <- 
+  rand_forest(mtry = 4, min_n = 20, trees = 100) %>% 
+  set_engine("ranger", num.threads = cores, importance = "impurity") %>% 
+  set_mode("classification")
+
+rf_fit <- model_rf %>%
+  fit(intentional_cause ~ ., data=fires_train)
+
+
+```
+
+```{r}
+
+preds <- predict(rf_fit, new_data = fires_test, type="prob")
+
+preds
+
+```
+
+```{r}
+submission <- data.frame(fires_final_test$id, preds$.pred_yes)
+
+colnames(submission)[1] ="id"
+colnames(submission)[2] ="intentional_cause"
+
+
+view(submission)
+
+write.csv(submission, "D:/Filipa/Documents/Filipa/Universidade/CompSci/Data Mining I/Assignment/submission.csv", row.names = FALSE)
+```
+
+# Descriptive Modelling
+
+```{r}
+library(tidyverse)
+library(cluster)
+library(dbscan)
+library(factoextra)
+library(readr)
+library(tidymodels)
+library(dplyr)
+
+
+#################################################################################################################################
+newFires2 <- read_csv("/Users/matiasluna/Downloads/Projeto/newFires.csv")
+
+# Retirar variáveis categóricas ou não utilizaveis em clustering
+fires1 <- select(newFires2, -c(id, region, district, municipality, parish, origin, alert_date, alert_hour, extinction_date, firstInterv_date, intentional_cause))
+# Retirar variáveis consideradas não necessárias
+fires1 <- select(fires1, -c(lat, lon))
+
+# Scaling
+fires1 <- fires1 %>% mutate_all(scale)
+
+#################################################################################################################################
+
+
+#################################################################################################################################
+# k-means
+k2 <- kmeans(fires1,centers=7) #7
+k2
+
+# Plot
+fviz_cluster(k2,fires1)
+
+
+si_coefs_k2 <- silhouette(k2$cluster,dist(fires1))
+fviz_silhouette(si_coefs_k2) + coord_flip()
+# silhouette
+fviz_nbclust(fires1, kmeans, method = "silhouette")
+
+# elbow
+fviz_nbclust(fires1, kmeans, method = "wss") + geom_vline(xintercept = 3, linetype=2)
+```
+
+```{r}
+#################################################################################################################################
+# PAM
+fviz_nbclust(fires1, pam, method = "wss") #4/5
+
+#perform k-medoids clustering with k = 4 clusters
+kmed <- pam(fires1, k = 5)
+
+#plot results of final k-medoids model
+fviz_cluster(kmed, data = fires1)
+
+```
+
+```{r}
+#################################################################################################################################
+# CLARA
+fviz_nbclust(fires1, clara, method = "wss") #4/5
+
+# Compute clara
+clarax <- clara(fires1, 2)
+# Cluster plot
+fviz_cluster(clarax, stand = FALSE, geom = "point",
+             pointsize = 1)
+
+```
+
+```{r}
+
+#################################################################################################################################
+#DBSCAN
+dbscan2 <- dbscan(fires1, eps=0.9)
+fviz_cluster(dbscan2,fires1)
+```
